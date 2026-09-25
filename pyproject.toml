@@ -1,0 +1,12 @@
+[project]
+name = "backtest-audit-proof"
+version = "0.1.0"
+description = "A naive backtest that finds edge where there is none, and the audit that takes it apart, artifact by artifact."
+requires-python = ">=3.11"
+dependencies = ["pandas>=2.2", "numpy>=1.26", "scipy>=1.13"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
