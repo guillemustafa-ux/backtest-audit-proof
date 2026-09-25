@@ -92,9 +92,13 @@ def event_vs_baseline(prices: pd.DataFrame, params: Params) -> dict:
     event, base = fwd[signals & valid], fwd[valid]
     t_vs_zero, _ = stats.ttest_1samp(event, 0.0)
     t_vs_base, p_vs_base = stats.ttest_ind(event, base[~signals[valid]], equal_var=False)
+    # The windows overlap exactly as in step 4, so the two-sample test above is only the i.i.d. reference point.
+    t_nw = st.newey_west_diff_t(base, signals[valid], lag=horizon - 1)
+    p_nw = float(2.0 * stats.norm.sf(abs(t_nw)))
     return {
         "event_mean": float(event.mean()), "baseline_mean": float(base.mean()), "excess_mean": float(event.mean() - base.mean()),
         "t_vs_zero": float(t_vs_zero), "t_vs_baseline": float(t_vs_base), "p_vs_baseline": float(p_vs_base),
+        "t_vs_baseline_nw": t_nw, "p_vs_baseline_nw": p_nw,
     }
 
 

@@ -24,7 +24,7 @@ Same seed, same numbers: `AUDIT_REPORT.md` regenerates byte-identical.
 | 2 | Target and stop both hit in one bar, booked as a win | Book the stop | 0.13 → −0.19 (8 of 230 exits) |
 | 3 | Zero transaction costs | 20 bps round trip | −0.19 → −0.62 |
 | 4 | Overlapping forward-return windows counted as independent | Newey-West and block-bootstrap t, effective N | N 273 → 139 |
-| 5 | Event returns tested against zero | Test against the unconditional baseline | on BTC: t 3.61 → 1.28 |
+| 5 | Event returns tested against zero | Test against the unconditional baseline, with Newey-West standard errors because those windows overlap too | on BTC: t 3.61 → 1.28 (i.i.d.) → 0.97 (Newey-West) |
 | 6 | Direction of the test chosen after seeing the sign | Two-sided test | p doubles |
 | 7 | Best of 125 parameter variants reported as *the* result | Benjamini-Hochberg FDR, deflated Sharpe ratio | 6 "significant" → 0; noise alone expects a best Sharpe of 2.39 |
 | 8 | Parameters optimized on the whole sample | Walk-forward with a holdout touched once | 0.54 in-sample → 0.29 holdout |

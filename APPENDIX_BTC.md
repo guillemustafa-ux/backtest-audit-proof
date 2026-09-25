@@ -14,7 +14,7 @@ The submitted backtest reports 370 trades, a 94.3% win rate, a total return of 4
 | 2 | Same-bar ambiguity resolved in favour of the target (18 of 365 exits) | Sharpe 0.50 | Sharpe 0.03 | material |
 | 3 | Zero transaction costs (audit applies 20 bps round trip) | Sharpe 0.03 | Sharpe -0.33 | material |
 | 4 | Overlapping 10-bar forward-return windows counted as independent | t = 3.61 on N = 407 | t = 2.12 (Newey-West), 2.09 (block bootstrap), effective N = 135 | material |
-| 5 | Event returns tested against zero instead of the baseline | t vs 0 = 3.61 | t vs baseline = 1.28, excess 0.8% per window, p = 0.20 | material: significance disappears |
+| 5 | Event returns tested against zero instead of the baseline | t vs 0 = 3.61 | t vs baseline = 1.28 (i.i.d.), 0.97 (Newey-West, p = 0.33), excess 0.8% per window | material: significance disappears |
 | 6 | One-sided test chosen after seeing the sign | p = 0.456 | p = 0.911 (two-sided) | minor |
 | 7 | Best of 125 variants reported without multiple-testing control | 12 variants significant at 5% | 0 after Benjamini-Hochberg; expected best Sharpe from noise alone 1.47; deflated-Sharpe probability 0.67 | material |
 | 8 | Parameters optimized on the full sample, no holdout | in-sample Sharpe 0.90 (1995 bars) | holdout Sharpe 0.49 (1331 bars, touched once) | material |
@@ -38,7 +38,7 @@ Rows 1-3 are corrections to the backtest itself and compound: after all three th
 - When a bar touches both target and stop, book the stop. If the order of touches matters to the strategy, the test needs intrabar data; daily bars cannot resolve it.
 - Charge a documented round-trip cost (spread, slippage, commission) on every trade and report the cost assumption next to every performance figure.
 - Report the effective sample size and a dependence-robust t-statistic (Newey-West or block bootstrap with blocks at least as long as the holding period) instead of the i.i.d. t-test.
-- Test event returns against the unconditional baseline over the same horizon, not against zero.
+- Test event returns against the unconditional baseline over the same horizon, not against zero, with the same dependence-robust standard errors: the baseline windows overlap too.
 - Pre-register the hypothesis direction; use two-sided tests unless the direction was fixed before looking at the data.
 - Control the family-wise or false-discovery rate across every variant tried, and report the deflated Sharpe ratio with the number of trials.
 - Keep a confirmatory holdout that is touched exactly once, after the methodology is frozen.

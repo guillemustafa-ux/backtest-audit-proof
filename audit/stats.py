@@ -21,6 +21,30 @@ def newey_west_t(x: np.ndarray, lag: int) -> float:
     return float(x.mean() / se) if se > 0 else 0.0
 
 
+def newey_west_diff_t(y: np.ndarray, group: np.ndarray, lag: int) -> float:
+    """t-statistic of mean(y | group) - mean(y | not group) with a Newey-West (Bartlett) HAC variance.
+
+    It is the OLS of y on a group dummy: the coefficient is the difference in means, and the
+    autocorrelation of the scores (centered dummy times residual) is what the i.i.d. two-sample
+    test ignores when the observations are overlapping windows.
+    """
+    y = np.asarray(y, dtype=float)
+    g = np.asarray(group, dtype=float)
+    gc = g - g.mean()
+    ssg = gc @ gc
+    if ssg == 0:
+        return 0.0
+    beta = (gc @ y) / ssg
+    resid = y - y.mean() - beta * gc
+    s = gc * resid
+    lrv = s @ s
+    for k in range(1, lag + 1):
+        w = 1.0 - k / (lag + 1.0)
+        lrv += 2.0 * w * (s[k:] @ s[:-k])
+    se = np.sqrt(max(lrv, 0.0)) / ssg
+    return float(beta / se) if se > 0 else 0.0
+
+
 def block_bootstrap_se(x: np.ndarray, block: int, n_boot: int = 1000, seed: int = 0) -> float:
     """Standard error of the mean from a moving-block bootstrap; blocks preserve the dependence."""
     x = np.asarray(x, dtype=float)

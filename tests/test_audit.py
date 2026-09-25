@@ -39,6 +39,27 @@ def test_baseline_comparison_changes_estimate():
     assert np.isfinite(r["excess_mean"])
 
 
+def test_baseline_test_is_dependence_robust():
+    """The event-vs-baseline windows overlap like the ones in step 4, so the test must not treat them as i.i.d."""
+    r = steps.event_vs_baseline(PRICES, PARAMS)
+    assert np.isfinite(r["t_vs_baseline_nw"]) and 0.0 <= r["p_vs_baseline_nw"] <= 1.0
+    assert abs(r["t_vs_baseline_nw"]) <= abs(r["t_vs_baseline"]) + 1e-9
+
+
+def test_newey_west_diff_t_shrinks_when_events_cluster():
+    """Overlapping windows only inflate the i.i.d. two-sample t when the events themselves come in runs,
+    as breakouts do; an event dummy that is white noise leaves nothing for the HAC correction to remove."""
+    rng = np.random.default_rng(5)
+    y = np.convolve(rng.normal(size=1209), np.ones(10), mode="valid")  # overlapping 10-step sums
+    z = np.convolve(rng.normal(size=1209), np.ones(10), mode="valid")
+    clustered = z > np.quantile(z, 0.85)  # 180 event bars in 43 runs
+    from scipy import stats as sp
+    t_iid, _ = sp.ttest_ind(y[clustered], y[~clustered], equal_var=False)
+    assert abs(st.newey_west_diff_t(y, clustered, lag=9)) < 0.6 * abs(t_iid)
+    assert np.isclose(st.newey_west_diff_t(y, clustered, lag=0), t_iid, rtol=0.05)
+    assert st.newey_west_diff_t(y, np.ones(len(y), dtype=bool), lag=9) == 0.0
+
+
 def test_two_sided_p_is_double_one_sided():
     r = steps.two_sided(PRICES, PARAMS)
     assert np.isclose(r["p_two_sided"], 2 * r["p_one_sided"], atol=1e-12) or r["p_two_sided"] >= r["p_one_sided"]
