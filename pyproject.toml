@@ -1,3 +1,11 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["audit"]
+py-modules = ["naive_backtest"]
+
 [project]
 name = "backtest-audit-proof"
 version = "0.1.0"
