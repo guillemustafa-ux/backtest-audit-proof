@@ -101,11 +101,11 @@ def event_vs_baseline(prices: pd.DataFrame, params: Params) -> dict:
 # --- 6. directional vs two-sided ---------------------------------------------------------------
 
 def two_sided(prices: pd.DataFrame, params: Params) -> dict:
+    """A direction chosen after seeing the sign always halves the p-value, whichever sign it is."""
     d = daily_returns(prices, run(prices, params, HONEST))
     d = d[d != 0]
     t, p_two = stats.ttest_1samp(d, 0.0)
-    p_one = p_two / 2 if t > 0 else 1 - p_two / 2
-    return {"t": float(t), "p_one_sided": float(p_one), "p_two_sided": float(p_two), "n": int(len(d))}
+    return {"t": float(t), "p_one_sided": float(p_two / 2), "p_two_sided": float(p_two), "n": int(len(d))}
 
 
 # --- 7. multiple testing / FDR + deflated Sharpe -----------------------------------------------
@@ -160,20 +160,22 @@ def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, 
     valid = np.nonzero(~np.isnan(a))[0]
     rng = np.random.default_rng(seed)
     control_sharpes = []
+    control_trades = []
     for _ in range(n_controls):
+        # Entry dates spread over the whole sample, like the strategy's; overlaps are dropped by the walk.
         entries = np.zeros(len(prices), dtype=bool)
         hold_at = np.zeros(len(prices), dtype=int)
-        picks = rng.choice(valid, size=min(n_trades * 3, len(valid)), replace=False)
-        picks.sort()
-        sampled_holds = rng.choice(holds, size=len(picks), replace=True)
+        picks = np.sort(rng.choice(valid, size=min(n_trades, len(valid)), replace=False))
         entries[picks] = True
-        hold_at[picks] = sampled_holds
-        trades = _walk(prices, entries, params, HONEST, a, holds=hold_at)[:n_trades]
+        hold_at[picks] = rng.choice(holds, size=len(picks), replace=True)
+        trades = _walk(prices, entries, params, HONEST, a, holds=hold_at)
+        control_trades.append(len(trades))
         control_sharpes.append(sharpe(daily_returns(prices, trades)))
     control_sharpes = np.array(control_sharpes)
     return {
         "strategy_sharpe": float(s_strat), "controls": n_controls,
         "control_mean": float(control_sharpes.mean()), "control_sd": float(control_sharpes.std(ddof=1)),
         "percentile": float((control_sharpes < s_strat).mean() * 100.0),
-        "matched_trades": n_trades, "median_hold": float(np.median(holds)) if len(holds) else 0.0,
+        "matched_trades": n_trades, "control_trades_mean": float(np.mean(control_trades)),
+        "median_hold": float(np.median(holds)) if len(holds) else 0.0,
     }
