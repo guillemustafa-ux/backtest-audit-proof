@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         prices, source = synthetic_prices(args.bars, args.seed), f"synthetic driftless random walk, seed {args.seed}"
     t0 = time.perf_counter()
     result = run_audit(prices, GRID, n_controls=args.controls, cost_bps=args.cost_bps)
-    text = render(result, source)
+    text = render(result, source, synthetic=not args.csv)
     with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     nv, co, rc = result["naive"], result["costs"], result["control"]

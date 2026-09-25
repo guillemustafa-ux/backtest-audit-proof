@@ -1,0 +1,2 @@
+https://api.binance.com/api/v3/klines symbol=BTCUSDT interval=1d
+fetched 2026-09-25 UTC, 3326 rows, 2017-08-17 to 2026-09-24
