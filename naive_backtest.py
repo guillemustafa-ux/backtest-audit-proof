@@ -12,7 +12,7 @@ from audit.data import synthetic_prices
 from audit.engine import Params, Rules, daily_returns, run, summary
 
 NAIVE_RULES = Rules(lookahead=True, same_bar_best_case=True, cost_bps=0.0)
-GRID = [Params(lookback=lb, target_atr=t, stop_atr=s) for lb in (5, 10, 20, 40, 60) for t in (1.5, 2.0, 3.0, 4.0) for s in (1.0, 1.5, 2.0, 3.0)]
+GRID = [Params(lookback=lb, target_atr=t, stop_atr=s) for lb in (5, 10, 20, 40, 60) for t in (0.75, 1.0, 1.5, 2.0, 3.0) for s in (0.5, 0.75, 1.0, 1.5, 2.0)]
 
 
 def best_of_grid(prices, rules=NAIVE_RULES):

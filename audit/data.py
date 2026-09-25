@@ -12,8 +12,9 @@ def synthetic_prices(n_bars: int = 3000, seed: int = 7, daily_vol: float = 0.012
     """Daily OHLC bars from a driftless log random walk.
 
     Close-to-close returns are i.i.d. normal with zero mean, so no rule based on past prices has
-    an expected edge. Intrabar high/low are drawn around the open-close range so that stops and
-    targets can be hit inside a bar, which is what the same-bar artifact needs.
+    an expected edge. Intrabar wicks are fat-tailed (Student t, 3 degrees of freedom) like real
+    range days, so stops and targets can both be hit inside one bar: that is what the same-bar
+    artifact needs. Tail shape does not create an edge; only the mean does, and it is zero.
     """
     rng = np.random.default_rng(seed)
     log_ret = rng.normal(0.0, daily_vol, n_bars)
@@ -23,7 +24,7 @@ def synthetic_prices(n_bars: int = 3000, seed: int = 7, daily_vol: float = 0.012
     open_[1:] = close[:-1] * np.exp(rng.normal(0.0, daily_vol * 0.25, n_bars - 1))
     body_hi = np.maximum(open_, close)
     body_lo = np.minimum(open_, close)
-    wick = np.abs(rng.normal(0.0, daily_vol * 0.6, (2, n_bars))) * close
+    wick = np.abs(rng.standard_t(3, (2, n_bars))) * daily_vol * 0.5 * close
     high = body_hi + wick[0]
     low = body_lo - wick[1]
     index = pd.bdate_range("2014-01-01", periods=n_bars)
