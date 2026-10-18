@@ -60,6 +60,25 @@ def test_equity_svg_draws_one_intermediate_step_dashed_and_refuses_a_fourth_curv
         charts.equity_drawdown_svg([("a", CLAIM), ("b", step), ("c", step), ("d", CORRECTED)], "t")
 
 
+def test_equity_svg_shades_the_control_band_under_the_curves_and_widens_the_axis_to_it():
+    # 40 runs of constant daily returns from -3% to +3%: the band spans about 0.26x to 3.7x, well beyond the curves' 0.72x to 1.39x
+    band = np.repeat(np.linspace(-0.03, 0.03, 40)[:, None], 50, axis=1)
+    svg = charts.equity_drawdown_svg(TWO, "t", band=band, band_name="40 runs, 5-95% band")
+    root = _root(svg)
+    polygons = list(root.iter(f"{SVG}polygon"))
+    assert len(polygons) == 1 and polygons[0].get("class") == "band"
+    children = list(root)
+    assert children.index(polygons[0]) < min(children.index(p) for p in root.iter(f"{SVG}polyline"))  # drawn under the curves
+    ys = [y for _, y in _points(polygons[0])]
+    assert min(ys) == charts.EQ_TOP and max(ys) == charts.EQ_BOT  # the axis widened to the band: its edges set both panel limits
+    assert all(0.0 <= x <= charts.WIDTH for x, _ in _points(polygons[0]))
+    assert "40 runs, 5-95% band" in svg
+    assert f"{SVG}polygon" not in {c.tag for c in _root(charts.equity_drawdown_svg(TWO, "t")).iter()}  # no band, no polygon
+    assert f"{SVG}polygon" not in {c.tag for c in _root(charts.equity_drawdown_svg(TWO, "t", band=np.zeros((0, 50)))).iter()}  # empty band, nothing drawn
+    with pytest.raises(ValueError, match="one row of daily returns per run"):
+        charts.equity_drawdown_svg(TWO, "t", band=np.zeros((3, 49)))
+
+
 def test_equity_svg_escapes_names_and_subtitles_and_caps_the_subtitle_lines():
     svg = charts.equity_drawdown_svg([("P&L <claim>", CLAIM), ("Corrected", CORRECTED)], "t", ("a & b", "c < d"))
     root = _root(svg)  # well-formed despite & and <
@@ -163,7 +182,8 @@ def test_risk_profile_exposes_the_daily_series():
 
 
 def test_write_charts_returns_relative_posix_paths(tmp_path):
-    result = {"params": Params(*CHOSEN), "costs": {"cost_bps": 20.0}, "risk": {"series": {"claim": CLAIM, "no_lookahead": np.zeros(50), "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE}}
+    result = {"params": Params(*CHOSEN), "costs": {"cost_bps": 20.0}, "risk": {"series": {"claim": CLAIM, "no_lookahead": np.zeros(50), "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE},
+              "control": {"controls": 3, "band_series": np.zeros((3, 50))}}
     paths = charts.write_charts(result, str(tmp_path / "AUDIT_REPORT.md"))
     assert paths == {"equity": "charts/AUDIT_REPORT_equity.svg", "sensitivity": "charts/AUDIT_REPORT_sensitivity.svg"}
     for rel in paths.values():
@@ -171,6 +191,7 @@ def test_write_charts_returns_relative_posix_paths(tmp_path):
     equity = (tmp_path / paths["equity"]).read_text(encoding="utf-8")
     assert "corrected: look-ahead removed, ambiguous bars booked to the stop, 20 bps per round trip" in equity
     assert equity.count('class="step"') == 2 and "Look-ahead removed only, final 1.00x" in equity  # the third curve reaches the file
+    assert equity.count('class="band"') == 1 and "3 matched random-entry runs, same cost: 5-95% band" in equity  # and so does the band
 
 
 def test_report_embeds_the_charts_only_when_given():

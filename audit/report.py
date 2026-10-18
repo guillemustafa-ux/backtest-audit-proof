@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from audit import steps
+from audit.charts import BAND_QUANTILES
 from audit.engine import Params, run, summary
 
 
@@ -14,6 +16,28 @@ def _pct(x: float) -> str:
 
 def _f(x: float, d: int = 2) -> str:
     return f"{x:.{d}f}"
+
+
+def _ordinal(x: float) -> str:
+    """68 -> "68th", 61 -> "61st", 100 -> "100th"; rounds first, so 99.6 reads "100th"."""
+    n = int(round(x))
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _band_sentence(rc: dict, rk: dict) -> str:
+    """How the shaded band of the equity chart was built, where the corrected run's final equity falls in it, and
+    how that differs from the percentile row 9 reports; empty when the audit ran with no controls."""
+    band = rc["band_series"]
+    if len(band) == 0:
+        return ""
+    finals = np.cumprod(1.0 + band, axis=1)[:, -1]
+    corrected_final = np.cumprod(1.0 + rk["series"]["corrected"])[-1]
+    rank = (finals < corrected_final).mean() * 100.0
+    lo, hi = BAND_QUANTILES
+    return (f" The shaded band is, bar by bar, the {_ordinal(lo)} to {_ordinal(hi)} percentile of the equity of the {rc['controls']} matched random-entry runs of row 9, "
+            f"charged the same {rc['cost_bps']:.0f} bps as the corrected run; the corrected run's final equity sits at the {_ordinal(rank)} percentile of theirs. "
+            f"Row 9 ranks the cost-free Sharpe ratio instead, where the strategy sits at the {_ordinal(rc['percentile'])}: two statistics over the same runs.")
 
 
 def run_audit(prices: pd.DataFrame, grid: list[Params], n_controls: int = 300, cost_bps: float = 20.0, universe: list[pd.DataFrame] | None = None) -> dict:
@@ -38,7 +62,7 @@ def run_audit(prices: pd.DataFrame, grid: list[Params], n_controls: int = 300, c
         "two_sided": steps.two_sided(prices, params),
         "multiple": steps.multiple_testing(prices, grid),
         "walk_forward": steps.walk_forward(prices, grid),
-        "control": steps.random_control(prices, params, n_controls=n_controls),
+        "control": steps.random_control(prices, params, n_controls=n_controls, cost_bps=cost_bps),
         "sensitivity": steps.parameter_sensitivity(prices, grid, params),
         "risk": steps.risk_profile(prices, params, cost_bps),
     }
@@ -78,7 +102,7 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
         f"| 6 | One-sided test chosen after seeing the sign | p = {ts['p_one_sided']:.3f} | p = {ts['p_two_sided']:.3f} (two-sided) | {'material' if ts['p_one_sided'] < 0.05 <= ts['p_two_sided'] else 'minor'} |",
         f"| 7 | Best of {mt['variants']} variants reported without multiple-testing control | {mt['significant_raw']} variants significant at 5% | {mt['significant_after_fdr']} after Benjamini-Hochberg; expected best Sharpe from noise alone {_f(mt['expected_max_sharpe_noise'])}; deflated-Sharpe probability {_f(mt['deflated_sharpe_prob'])} | {'material' if mt['deflated_sharpe_prob'] < 0.95 else 'minor'} |",
         f"| 8 | Parameters optimized on the full sample, no holdout | in-sample Sharpe {_f(wf['sharpe_in_sample'])} ({wf['train_bars']} bars) | holdout Sharpe {_f(wf['sharpe_holdout'])} ({wf['holdout_bars']} bars, touched once) | {_sev(wf['sharpe_in_sample'] - wf['sharpe_holdout'])} |",
-        f"| 9 | No random-entry control | strategy Sharpe {_f(rc['strategy_sharpe'])} | {rc['controls']} matched random-entry runs: mean {_f(rc['control_mean'])}, sd {_f(rc['control_sd'])}; strategy at the {rc['percentile']:.0f}th percentile | {'material' if rc['percentile'] < 95 else 'minor'} |",
+        f"| 9 | No random-entry control | strategy Sharpe {_f(rc['strategy_sharpe'])} | {rc['controls']} matched random-entry runs: mean {_f(rc['control_mean'])}, sd {_f(rc['control_sd'])}; strategy at the {_ordinal(rc['percentile'])} percentile | {'material' if rc['percentile'] < 95 else 'minor'} |",
         f"| 10 | Only the best parameter point is reported; the surface around it is hidden | reported variant Sharpe {_f(se['reported_sharpe'])} (rank {se['rank']} of {len(se['surface'])}) | its {se['neighbours']} one-step neighbours: mean {_f(se['neighbour_mean'])} (min {_f(se['neighbour_min'])}, max {_f(se['neighbour_max'])}), {se['within_0_3']} of {se['neighbours']} within 0.3 of the reported value; grid median {_f(se['grid_median'])} | {'material' if _spike(se) else 'minor'} |",
         *([f"| 11 | Universe taken as of today: {sv['delisted']} of {sv['n_symbols']} symbols that fell below {sv['floor']:.0%} of their start were dropped from the history | survivors only ({sv['survivors']} symbols): mean per-symbol Sharpe {_f(sv['survivors_mean_symbol_sharpe'])}, symbols' mean buy-and-hold return {_pct(sv['survivors_mean_price_return'])} | point-in-time universe ({sv['n_symbols']} symbols, each until its delisting): mean per-symbol Sharpe {_f(sv['point_in_time_mean_symbol_sharpe'])}, symbols' mean buy-and-hold return {_pct(sv['all_mean_price_return'])} | {_sev(sv['survivors_mean_symbol_sharpe'] - sv['point_in_time_mean_symbol_sharpe'])} |"] if sv else []),
         "",
@@ -114,7 +138,8 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
             "",
             "Both charts are generated by `python -m audit` as plain SVG; the equity panel compounds the daily mark-to-market returns from 1.0 on a log axis, "
             "the lower panel is the drawdown from the running peak. The dashed curve is the claim with only the look-ahead removed (row 1): the gap between it and the claim "
-            f"is what knowing the close before entering was worth, and the gap to the corrected curve is rows 2 and 3. The heatmap is the stop = {p.stop_atr} ATR slice of the grid; the neighbours along the stop axis are not in it.",
+            f"is what knowing the close before entering was worth, and the gap to the corrected curve is rows 2 and 3.{_band_sentence(rc, rk)} "
+            f"The heatmap is the stop = {p.stop_atr} ATR slice of the grid; the neighbours along the stop axis are not in it.",
             "",
         ]
     lines += ["## Material weaknesses", ""]
