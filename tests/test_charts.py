@@ -33,7 +33,7 @@ def test_equity_svg_has_two_polylines_per_panel_and_the_final_equity_in_the_lege
     svg = charts.equity_drawdown_svg(CLAIM, CORRECTED, "test")
     root = _root(svg)
     assert len(list(root.iter(f"{SVG}polyline"))) == 4
-    assert f"Claim {np.prod(1.0 + CLAIM):.2f}" in svg and f"Corrected {np.prod(1.0 + CORRECTED):.2f}" in svg
+    assert f"Claim, final {np.prod(1.0 + CLAIM):.2f}x" in svg and f"Corrected, final {np.prod(1.0 + CORRECTED):.2f}x" in svg
 
 
 def test_label_handles_fine_steps_without_raising():
@@ -99,7 +99,22 @@ def test_equity_svg_downsamples_long_series():
     long_a, long_b = rng.normal(0.0, 0.01, 3000), rng.normal(0.0, 0.01, 3000)
     root = _root(charts.equity_drawdown_svg(long_a, long_b, "t"))
     for poly in root.iter(f"{SVG}polyline"):
-        assert poly.get("points").count(",") <= 602
+        assert poly.get("points").count(",") <= 3 * charts.MAX_POINTS + 1  # per bucket: first bar, minimum, maximum
+
+
+def test_thinning_keeps_every_bucket_extreme_and_the_drawn_drawdown_bottom():
+    # a 3000-bar flat series with one -10% dip: step 5 visits bar 2650 but not 2652, so the dip must be kept by value, not position
+    on_grid, off_grid = np.zeros(3000), np.zeros(3000)
+    on_grid[2650], on_grid[2651] = -0.1, 1 / 0.9 - 1
+    off_grid[2652], off_grid[2653] = -0.1, 1 / 0.9 - 1
+    idx = charts._thin(np.cumprod(1.0 + off_grid))
+    assert 2652 in idx and 2650 in idx and idx[0] == 0 and idx[-1] == 2999  # the dip is kept; the recovery bar equals its neighbours and is not an extreme
+    bottoms = []
+    for series in (on_grid, off_grid):
+        root = _root(charts.equity_drawdown_svg(series, np.zeros(3000), "t"))
+        claim_drawdown = [p for p in root.iter(f"{SVG}polyline") if p.get("class") == "claim"][1]
+        bottoms.append(max(y for _, y in _points(claim_drawdown)))
+    assert bottoms[0] == bottoms[1] > charts.DD_TOP + 1  # the dip reaches the same pixel whether or not its bar sits on the sampling grid
 
 
 def test_risk_profile_exposes_the_daily_series():
@@ -110,11 +125,13 @@ def test_risk_profile_exposes_the_daily_series():
 
 
 def test_write_charts_returns_relative_posix_paths(tmp_path):
-    result = {"params": Params(*CHOSEN), "risk": {"series": {"claim": CLAIM, "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE}}
+    result = {"params": Params(*CHOSEN), "costs": {"cost_bps": 20.0}, "risk": {"series": {"claim": CLAIM, "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE}}
     paths = charts.write_charts(result, str(tmp_path / "AUDIT_REPORT.md"))
     assert paths == {"equity": "charts/AUDIT_REPORT_equity.svg", "sensitivity": "charts/AUDIT_REPORT_sensitivity.svg"}
     for rel in paths.values():
         _root((tmp_path / rel).read_text(encoding="utf-8"))
+    equity = (tmp_path / paths["equity"]).read_text(encoding="utf-8")
+    assert "corrected: look-ahead removed, ambiguous bars booked to the stop, 20 bps per round trip" in equity
 
 
 def test_report_embeds_the_charts_only_when_given():
