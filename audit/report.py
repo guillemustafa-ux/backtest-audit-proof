@@ -19,7 +19,10 @@ def _f(x: float, d: int = 2) -> str:
 
 
 def _ordinal(x: float) -> str:
-    """68 -> "68th", 61 -> "61st", 100 -> "100th"; rounds first, so 99.6 reads "100th"."""
+    """68 -> "68th", 61 -> "61st", 100 -> "100th"; rounds first, so 99.6 reads "100th". A NaN (no controls) reads "nan",
+    as the plain format did, so a run with zero controls still renders."""
+    if not np.isfinite(x):
+        return f"{x:.0f}"
     n = int(round(x))
     suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix}"

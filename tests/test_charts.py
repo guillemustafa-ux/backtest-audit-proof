@@ -194,6 +194,24 @@ def test_write_charts_returns_relative_posix_paths(tmp_path):
     assert equity.count('class="band"') == 1 and "3 matched random-entry runs, same cost: 5-95% band" in equity  # and so does the band
 
 
+def test_ordinal_suffixes_and_nan():
+    assert [report._ordinal(v) for v in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 100, 101, 111, 99.6, 67.4)] == [
+        "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "100th", "101st", "111th", "100th", "67th"]
+    assert report._ordinal(float("nan")) == "nan"
+
+
+def test_report_renders_with_zero_controls_and_describes_the_band_otherwise():
+    prices = synthetic_prices(500, seed=11)
+    without = report.render(report.run_audit(prices, GRID, n_controls=0), "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
+    assert "nan" in without and "The shaded band" not in without  # row 9 degrades to nan, nothing crashes, no band sentence
+    r = report.run_audit(prices, GRID, n_controls=5)
+    text = report.render(r, "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
+    finals = np.cumprod(1.0 + r["control"]["band_series"], axis=1)[:, -1]
+    rank = (finals < np.cumprod(1.0 + r["risk"]["series"]["corrected"])[-1]).mean() * 100
+    assert f"5 matched random-entry runs of row 9, charged the same 20 bps" in text and f"sits at the {report._ordinal(rank)} percentile of theirs" in text
+    assert f"strategy sits at the {report._ordinal(r['control']['percentile'])}: two statistics over the same runs" in text
+
+
 def test_report_embeds_the_charts_only_when_given():
     r = report.run_audit(synthetic_prices(500, seed=11), GRID, n_controls=10)
     with_charts = report.render(r, "test", charts={"equity": "charts/x_equity.svg", "sensitivity": "charts/x_sensitivity.svg"})
