@@ -203,13 +203,15 @@ def test_ordinal_suffixes_and_nan():
 def test_report_renders_with_zero_controls_and_describes_the_band_otherwise():
     prices = synthetic_prices(500, seed=11)
     without = report.render(report.run_audit(prices, GRID, n_controls=0), "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
-    assert "nan" in without and "The shaded band" not in without  # row 9 degrades to nan, nothing crashes, no band sentence
+    assert "strategy at the nan percentile" in without and "The shaded band" not in without  # row 9 degrades to nan, nothing crashes, no band sentence
     r = report.run_audit(prices, GRID, n_controls=5)
     text = report.render(r, "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
+    # seed 11, 500 bars, 5 controls: the controls end at 0.8772, 0.9297, 0.7986, 0.9127 and 0.9928x, the corrected run at 0.9261x,
+    # so 3 of 5 finals sit below it (60th); the cost-free Sharpe rank of row 9 is 80th. Pinned values, not the formula under test.
     finals = np.cumprod(1.0 + r["control"]["band_series"], axis=1)[:, -1]
-    rank = (finals < np.cumprod(1.0 + r["risk"]["series"]["corrected"])[-1]).mean() * 100
-    assert f"5 matched random-entry runs of row 9, charged the same 20 bps" in text and f"sits at the {report._ordinal(rank)} percentile of theirs" in text
-    assert f"strategy sits at the {report._ordinal(r['control']['percentile'])}: two statistics over the same runs" in text
+    assert np.allclose(np.sort(finals), [0.7986, 0.8772, 0.9127, 0.9297, 0.9928], atol=5e-5) and np.cumprod(1.0 + r["risk"]["series"]["corrected"])[-1] == pytest.approx(0.9261, abs=5e-5)
+    assert "5 matched random-entry runs of row 9, charged the same 20 bps" in text and "sits at the 60th percentile of theirs" in text
+    assert "strategy sits at the 80th: two statistics over the same runs" in text
 
 
 def test_report_embeds_the_charts_only_when_given():
