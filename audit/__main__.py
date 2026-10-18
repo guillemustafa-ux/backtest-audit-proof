@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.universe:
             universe = synthetic_universe(args.universe, args.bars, args.seed)
     result = run_audit(prices, GRID, n_controls=args.controls, cost_bps=args.cost_bps, universe=universe)
-    charts = write_charts(result, args.out)
+    charts = write_charts(result, args.out, dates=prices.index if args.csv else None)  # synthetic dates are placeholders: bars
     text = render(result, source, synthetic=not args.csv, charts=charts)
     with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)

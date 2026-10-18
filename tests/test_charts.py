@@ -142,6 +142,48 @@ def test_equity_x_axis_ends_at_the_last_bar():
     assert all(_points(poly)[-1][0] == charts.WIDTH - charts.RIGHT for poly in root.iter(f"{SVG}polyline"))
 
 
+def test_equity_x_axis_shows_years_when_dates_are_given():
+    def x_labels(svg):
+        root = _root(svg)
+        return [t.text for t in root.iter(f"{SVG}text") if t.get("y") == str(charts.DD_BOT + 16)], [t.text for t in root.iter(f"{SVG}text") if t.get("y") == str(charts.DD_BOT + 34)]
+    # 50 business days from 2019-11-01 cross one year boundary: one tick, labelled with the year, and no "bar" title
+    dates = pd.bdate_range("2019-11-01", periods=50)
+    svg = charts.equity_drawdown_svg(TWO, "t", dates=dates)
+    labels, title = x_labels(svg)
+    assert labels == ["2020"] and title == []
+    first_2020 = next(i for i in range(1, 50) if dates[i].year == 2020 and dates[i - 1].year == 2019)
+    x = f"{charts.LEFT + first_2020 / 49 * (charts.WIDTH - charts.LEFT - charts.RIGHT):.1f}"  # the tick sits on the first bar of 2020
+    root = _root(svg)
+    assert [t.get("x") for t in root.iter(f"{SVG}text") if t.text == "2020"] == [x]
+    assert sum(1 for l in root.iter(f"{SVG}line") if l.get("x1") == x and l.get("x2") == x and l.get("stroke") == charts.GRID) == 2  # one gridline per panel
+    # a sample inside one calendar year has no year start: the axis falls back to bars so it is never empty
+    labels, title = x_labels(charts.equity_drawdown_svg(TWO, "t", dates=pd.bdate_range("2020-02-03", periods=50)))
+    assert labels == ["0", "10", "20", "30", "40"] and title == ["bar"]
+    # 3000 business days from 2014 start eleven new years: more than eight, so every second one is labelled
+    long = np.zeros(3000)
+    labels, _ = x_labels(charts.equity_drawdown_svg([("Claim", long), ("Corrected", long)], "t", dates=pd.bdate_range("2014-01-01", periods=3000)))
+    assert labels == ["2015", "2017", "2019", "2021", "2023", "2025"]
+    _, title = x_labels(charts.equity_drawdown_svg(TWO, "t"))
+    assert title == ["bar"]  # without dates the axis stays in bars
+    with pytest.raises(ValueError, match="one entry per bar"):
+        charts.equity_drawdown_svg(TWO, "t", dates=pd.bdate_range("2019-11-01", periods=49))
+
+
+def test_main_labels_years_only_for_csv_data(tmp_path):
+    from audit.__main__ import main
+
+    def x_axis(out):
+        root = _root((tmp_path / "charts" / f"{out}_equity.svg").read_text(encoding="utf-8"))
+        return [t.text for t in root.iter(f"{SVG}text") if t.get("y") in (str(charts.DD_BOT + 16), str(charts.DD_BOT + 34))]
+
+    assert main(["--bars", "500", "--seed", "11", "--controls", "5", "--universe", "0", "--out", str(tmp_path / "SYN.md")]) == 0
+    assert x_axis("SYN") == ["0", "100", "200", "300", "400", "bar"]  # synthetic dates are placeholders: bars
+    csv = tmp_path / "real.csv"
+    synthetic_prices(500, seed=11).set_index(pd.bdate_range("2019-11-01", periods=500)).rename_axis("date").to_csv(csv)
+    assert main(["--csv", str(csv), "--controls", "5", "--out", str(tmp_path / "CSV.md")]) == 0
+    assert x_axis("CSV") == ["2020", "2021"]  # real dates: calendar years, no "bar" title
+
+
 def test_equity_svg_rejects_a_return_at_or_below_minus_one():
     with pytest.raises(ValueError, match="-1"):
         charts.equity_drawdown_svg([("Claim", np.array([0.0, -1.0, 0.0])), ("Corrected", np.zeros(3))], "t")
