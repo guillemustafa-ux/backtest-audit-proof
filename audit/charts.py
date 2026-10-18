@@ -58,6 +58,24 @@ def _log_ticks(lo: float, hi: float) -> list[float]:
     return [v for _, v in inside]
 
 
+def _x_marks(n: int, dates: pd.DatetimeIndex | None) -> tuple[list[tuple[float, str]], str]:
+    """(bar position, label) for the x axis and the axis title. Without dates: round bar numbers, none past the
+    last bar, titled "bar". With dates: the first bar of every calendar year, every k-th year when more than eight
+    would show, labelled with the year and no title, because the labels say what they are.
+    """
+    if dates is None:
+        ticks, step = _ticks(0.0, float(n - 1), 5)
+        return [(v, _label(v, step)) for v in ticks if v <= n - 1], "bar"
+    if len(dates) != n:
+        raise ValueError("dates must have one entry per bar")
+    years = np.asarray(dates.year)
+    starts = [i for i in range(1, n) if years[i] != years[i - 1]]
+    if not starts:
+        return _x_marks(n, None)  # a sample inside one calendar year has no year start to mark: bars, so the axis is not empty
+    every = max(1, math.ceil(len(starts) / 8))
+    return [(float(i), str(years[i])) for i in starts[::every]], ""
+
+
 def _scale(lo: float, hi: float, px0: float, px1: float):
     k = (px1 - px0) / (hi - lo)
     return lambda v: px0 + (v - lo) * k
@@ -110,7 +128,7 @@ def _styles(count: int) -> list[tuple[str, str, str]]:
 
 
 def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title: str, subtitles: Sequence[str] = (),
-                        band: np.ndarray | None = None, band_name: str = "") -> str:
+                        band: np.ndarray | None = None, band_name: str = "", dates: pd.DatetimeIndex | None = None) -> str:
     """Two stacked panels: equity compounded from 1.0 for every daily series on a log axis, so a claim at 46000x and
     a corrected curve at 0.5x are both visible, and the drawdown from the running peak on a linear axis (the peak
     starts at 1.0, as in `stats.max_drawdown`). `curves` is (legend name, daily returns) in drawing order: the claim
@@ -122,7 +140,8 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
 
     `band`, one row of daily returns per control run, draws the bar-by-bar 5th to 95th percentile of the runs'
     equity as a neutral fill under the curves of the equity panel, with `band_name` in the legend; the drawdown
-    panel does not get it. An empty band draws nothing.
+    panel does not get it. An empty band draws nothing. `dates`, one per bar, labels the x axis with calendar years
+    instead of bar numbers; the synthetic run leaves it out because its dates are placeholders.
     """
     if isinstance(subtitles, str) or len(subtitles) > 2:
         raise ValueError("subtitles is a sequence of at most two lines, which is what fits between the title and the first panel")
@@ -137,8 +156,7 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
     equity = [np.cumprod(1.0 + s) for s in series]
     drawdown = [e / np.maximum(np.maximum.accumulate(e), 1.0) - 1.0 for e in equity]
     edges = None if band is None else np.percentile(np.cumprod(1.0 + band, axis=1), BAND_QUANTILES, axis=0)
-    x_ticks, x_step = _ticks(0.0, float(n - 1), 5)
-    x_ticks = [v for v in x_ticks if v <= n - 1]  # the axis ends at the last bar: no tick or gridline beyond it
+    x_marks, x_title = _x_marks(n, dates)
     eq_lo, eq_hi = min(e.min() for e in equity), max(e.max() for e in equity)
     if edges is not None:
         eq_lo, eq_hi = min(eq_lo, edges[0].min()), max(eq_hi, edges[1].max())
@@ -162,16 +180,17 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
             y = sy(v)
             body.append(f'<line x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}" stroke="{GRID}"/>')
             body.append(f'<text x="{LEFT - 6}" y="{y + 4:.1f}" text-anchor="end" fill="{MUTED}">{label}</text>')
-        for v in x_ticks:
+        for v, _ in x_marks:
             body.append(f'<line x1="{sx(v):.1f}" y1="{top}" x2="{sx(v):.1f}" y2="{bot}" stroke="{GRID}"/>')
         mid = (top + bot) / 2
         body.append(f'<text transform="rotate(-90 14 {mid:.1f})" x="14" y="{mid:.1f}" text-anchor="middle" fill="{MUTED}">{name}</text>')
         for (cls, colour, dash), values in zip(styles, data):
             keep = _thin(values)
             body.append(_polyline(cls, colour, sx(keep.astype(float)), sy(values[keep]), dash))
-    for v in x_ticks:
-        body.append(f'<text x="{sx(v):.1f}" y="{DD_BOT + 16}" text-anchor="middle" fill="{MUTED}">{_label(v, x_step)}</text>')
-    body.append(f'<text x="{(LEFT + WIDTH - RIGHT) / 2:.1f}" y="{DD_BOT + 34}" text-anchor="middle" fill="{MUTED}">bar</text>')
+    for v, label in x_marks:
+        body.append(f'<text x="{sx(v):.1f}" y="{DD_BOT + 16}" text-anchor="middle" fill="{MUTED}">{label}</text>')
+    if x_title:
+        body.append(f'<text x="{(LEFT + WIDTH - RIGHT) / 2:.1f}" y="{DD_BOT + 34}" text-anchor="middle" fill="{MUTED}">{x_title}</text>')
     eq_sy = panels[0][4]
     for i, (name, (cls, colour, dash), e) in enumerate(zip(names, styles, equity)):
         y = EQ_TOP + 16 + 16 * i
@@ -231,8 +250,9 @@ def sensitivity_svg(surface: dict[tuple[float, float, float], float], chosen: tu
     return _svg(WIDTH, int(bottom + 48), title, body)
 
 
-def write_charts(result: dict, out_path: str) -> dict[str, str]:
-    """Write both charts under charts/ next to the report and return their report-relative posix paths."""
+def write_charts(result: dict, out_path: str, dates: pd.DatetimeIndex | None = None) -> dict[str, str]:
+    """Write both charts under charts/ next to the report and return their report-relative posix paths. `dates`
+    labels the equity chart's x axis with years; pass it for real data only."""
     out, p = Path(out_path), result["params"]
     series, cost_bps, control = result["risk"]["series"], result["costs"]["cost_bps"], result["control"]
     curves = [("Claim", series["claim"]), ("Look-ahead removed only", series["no_lookahead"]), ("Corrected", series["corrected"])]
@@ -246,6 +266,7 @@ def write_charts(result: dict, out_path: str) -> dict[str, str]:
             ),
             band=control["band_series"],
             band_name=f"{control['controls']} matched random-entry runs, same cost: {BAND_QUANTILES[0]:.0f}-{BAND_QUANTILES[1]:.0f}% band",
+            dates=dates,
         ),
         "sensitivity": sensitivity_svg(result["sensitivity"]["surface"], (p.lookback, p.target_atr, p.stop_atr), "Naive Sharpe across the parameter grid"),
     }
