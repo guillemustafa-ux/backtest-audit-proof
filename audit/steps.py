@@ -209,9 +209,15 @@ def parameter_sensitivity(prices: pd.DataFrame, grid: list[Params], params: Para
     Run under the NAIVE rules the surface is the one the claim was selected on, so the row audits the
     claim itself. An interior point of the 5x5x5 grid has 6 neighbours, a corner has 3.
     """
+    keys = {_key(p) for p in grid}
+    if _key(params) not in keys:
+        raise ValueError(f"params not in grid: {_key(params)}")
+    near_params = [p for p in _neighbours(params, grid) if _key(p) in keys]
+    if not near_params:
+        raise ValueError("params has no grid neighbours: the grid needs a second value on at least one axis")
     surface = {_key(p): sharpe(daily_returns(prices, run(prices, p, rules), rules.cost_bps)) for p in grid}
     reported = surface[_key(params)]
-    near = np.array([surface[_key(p)] for p in _neighbours(params, grid) if _key(p) in surface])
+    near = np.array([surface[_key(p)] for p in near_params])
     values = np.array(list(surface.values()))
     return {
         "rules": "naive" if rules == NAIVE else "honest", "reported_sharpe": float(reported),

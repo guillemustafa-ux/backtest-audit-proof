@@ -33,15 +33,33 @@ def _ticks(lo: float, hi: float, target: int) -> tuple[list[float], float]:
 
 
 def _label(v: float, step: float, scale: float = 1.0, suffix: str = "") -> str:
-    """A tick label with exactly the decimals its step needs: 10 -> "10", 2.5 -> "2.5", -0.2 at scale 100 -> "-20%"."""
+    """A tick label with exactly the decimals its step needs: 10 -> "10", 2.5 -> "2.5", -0.2 at scale 100 -> "-20%".
+    A step finer than six decimals gets three significant digits instead of failing.
+    """
     v, step = v * scale + 0.0, step * scale
-    decimals = next(d for d in range(4) if abs(step * 10**d - round(step * 10**d)) < 1e-9)
-    return f"{v:.{decimals}f}{suffix}"
+    decimals = next((d for d in range(7) if abs(step * 10**d - round(step * 10**d)) < 1e-9), None)
+    return f"{v:.{decimals}f}{suffix}" if decimals is not None else f"{v:.3g}{suffix}"
+
+
+def _log_ticks(lo: float, hi: float) -> list[float]:
+    """1, 2 and 5 times a power of ten inside [lo, hi]; when fewer than three fall inside, the nearest values
+    below and above are added until there are at least three."""
+    decades = range(math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 2)
+    nice = [m * 10.0**k for k in decades for m in (1.0, 2.0, 5.0)]
+    below, inside, above = [v for v in nice if v < lo], [v for v in nice if lo <= v <= hi], [v for v in nice if v > hi]
+    while len(inside) < 3:
+        inside = [below.pop()] + inside + [above.pop(0)]
+    return inside
 
 
 def _scale(lo: float, hi: float, px0: float, px1: float):
     k = (px1 - px0) / (hi - lo)
     return lambda v: px0 + (v - lo) * k
+
+
+def _log_scale(lo: float, hi: float, px0: float, px1: float):
+    linear = _scale(math.log10(lo), math.log10(hi), px0, px1)
+    return lambda v: linear(np.log10(v))
 
 
 def _thin(n: int) -> np.ndarray:
@@ -66,31 +84,33 @@ def _polyline(cls: str, colour: str, xs: np.ndarray, ys: np.ndarray) -> str:
 
 
 def equity_drawdown_svg(claim: np.ndarray | pd.Series, corrected: np.ndarray | pd.Series, title: str) -> str:
-    """Two stacked panels: equity compounded from 1.0 for both daily series, and the drawdown from the running peak
-    (the peak starts at 1.0, as in `stats.max_drawdown`). Linear axes, round ticks, the final equity in the legend.
+    """Two stacked panels: equity compounded from 1.0 for both daily series on a log axis, so a claim at 46x and a
+    corrected curve at 0.5x are both visible, and the drawdown from the running peak on a linear axis (the peak
+    starts at 1.0, as in `stats.max_drawdown`). Round ticks, the final equity in the legend.
     """
     series = [np.asarray(s, dtype=float) for s in (claim, corrected)]
     n = len(series[0])
-    assert n >= 2 and all(len(s) == n and np.isfinite(s).all() for s in series)
+    assert n >= 2 and all(len(s) == n and np.isfinite(s).all() and (s > -1.0).all() for s in series)  # equity stays > 0
     equity = [np.cumprod(1.0 + s) for s in series]
     drawdown = [e / np.maximum(np.maximum.accumulate(e), 1.0) - 1.0 for e in equity]
     keep = _thin(n)
     x_ticks, x_step = _ticks(0.0, float(n - 1), 5)
-    eq_ticks, eq_step = _ticks(min(e.min() for e in equity), max(e.max() for e in equity), 4)
+    eq_lo, eq_hi = min(e.min() for e in equity), max(e.max() for e in equity)
+    eq_ticks = _log_ticks(eq_lo, eq_hi)
     dd_ticks, dd_step = _ticks(min(min(d.min() for d in drawdown), -0.01), 0.0, 3)
     sx = _scale(0.0, x_ticks[-1], LEFT, WIDTH - RIGHT)
     panels = (
-        (EQ_TOP, EQ_BOT, eq_ticks, eq_step, 1.0, "", _scale(eq_ticks[0], eq_ticks[-1], EQ_BOT, EQ_TOP), equity, "equity (start 1.0)"),
-        (DD_TOP, DD_BOT, dd_ticks, dd_step, 100.0, "%", _scale(dd_ticks[0], dd_ticks[-1], DD_BOT, DD_TOP), drawdown, "drawdown from peak"),
+        (EQ_TOP, EQ_BOT, eq_ticks, [_label(v, v) for v in eq_ticks], _log_scale(min(eq_lo, eq_ticks[0]), max(eq_hi, eq_ticks[-1]), EQ_BOT, EQ_TOP), equity, "equity (start 1.0, log scale)"),
+        (DD_TOP, DD_BOT, dd_ticks, [_label(v, dd_step, 100.0, "%") for v in dd_ticks], _scale(dd_ticks[0], dd_ticks[-1], DD_BOT, DD_TOP), drawdown, "drawdown from peak"),
     )
     body = []
     xs = sx(keep.astype(float))
-    for top, bot, ticks, step, scale, suffix, sy, data, name in panels:
+    for top, bot, ticks, labels, sy, data, name in panels:
         body.append(f'<rect x="{LEFT}" y="{top}" width="{WIDTH - LEFT - RIGHT}" height="{bot - top}" fill="none" stroke="{AXIS}"/>')
-        for v in ticks:
+        for v, label in zip(ticks, labels):
             y = sy(v)
             body.append(f'<line x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}" stroke="{GRID}"/>')
-            body.append(f'<text x="{LEFT - 6}" y="{y + 4:.1f}" text-anchor="end" fill="{MUTED}">{_label(v, step, scale, suffix)}</text>')
+            body.append(f'<text x="{LEFT - 6}" y="{y + 4:.1f}" text-anchor="end" fill="{MUTED}">{label}</text>')
         for v in x_ticks:
             body.append(f'<line x1="{sx(v):.1f}" y1="{top}" x2="{sx(v):.1f}" y2="{bot}" stroke="{GRID}"/>')
         mid = (top + bot) / 2

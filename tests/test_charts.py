@@ -35,6 +35,29 @@ def test_equity_svg_has_two_polylines_per_panel_and_the_final_equity_in_the_lege
     assert f"Claim {np.prod(1.0 + CLAIM):.2f}" in svg and f"Corrected {np.prod(1.0 + CORRECTED):.2f}" in svg
 
 
+def test_label_handles_fine_steps_without_raising():
+    assert charts._label(0.0025, 0.0025) == "0.0025"
+    assert charts._label(-0.0025, 0.0025, 100.0, "%") == "-0.25%"
+    assert charts._label(1.0, 2.5e-8) == "1"  # finer than six decimals: general format instead of StopIteration
+
+
+def test_equity_svg_renders_a_narrow_series_with_distinct_tick_labels():
+    narrow = np.resize([1e-4, -1e-4], 50)
+    root = _root(charts.equity_drawdown_svg(narrow, -narrow, "t"))
+    labels = [t.text for t in root.iter(f"{SVG}text") if t.get("text-anchor") == "end"]
+    assert len(labels) >= 6 and len(set(labels)) == len(labels)
+
+
+def test_equity_axis_is_log_with_nice_ticks():
+    assert np.allclose(charts._log_ticks(0.45, 32.5), [0.5, 1, 2, 5, 10, 20])
+    assert np.allclose(charts._log_ticks(0.99, 1.01), [0.5, 1, 2])  # widened to three ticks
+    svg = charts.equity_drawdown_svg(CLAIM, CORRECTED, "t")
+    root = _root(svg)
+    assert "equity (start 1.0, log scale)" in svg and len(list(root.iter(f"{SVG}polyline"))) == 4
+    equity_labels = [t.text for t in root.iter(f"{SVG}text") if t.get("text-anchor") == "end" and not t.text.endswith("%")]
+    assert equity_labels == ["0.5", "1", "2"]  # the hand-made series stay inside [0.5, 2]
+
+
 def test_sensitivity_svg_prints_every_cell_and_marks_the_chosen_one():
     svg = charts.sensitivity_svg(SURFACE, CHOSEN, "test")
     root = _root(svg)

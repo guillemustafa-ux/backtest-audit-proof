@@ -1,6 +1,7 @@
 """Risk statistics, the parameter-sensitivity step and the risk profile added to the audit."""
 
 import numpy as np
+import pytest
 
 from audit import report, stats as st, steps
 from audit.data import synthetic_prices
@@ -44,6 +45,17 @@ def test_sensitivity_neighbour_count_depends_on_position_in_grid():
     assert interior["neighbours"] == len(interior["neighbour_sharpes"]) == 6
     assert corner["neighbours"] == 3
     assert 0.0 <= interior["share_within_0_3"] <= 1.0
+
+
+def test_sensitivity_rejects_a_grid_without_neighbours():
+    point = Params(lookback=5, target_atr=1.0, stop_atr=0.5)
+    with pytest.raises(ValueError, match="no grid neighbours"):
+        steps.parameter_sensitivity(PRICES, [point], point)
+
+
+def test_sensitivity_rejects_params_off_the_grid():
+    with pytest.raises(ValueError, match="not in grid"):
+        steps.parameter_sensitivity(PRICES, steps.small_grid(), Params(lookback=7, target_atr=1.0, stop_atr=0.5))
 
 
 def test_risk_profile_bounds():
