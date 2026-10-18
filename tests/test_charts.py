@@ -180,6 +180,12 @@ def test_equity_x_axis_shows_years_when_dates_are_given():
         charts.equity_drawdown_svg(TWO, "t", dates=unsorted)
     with pytest.raises(ValueError, match="one entry per bar"):
         charts.equity_drawdown_svg(TWO, "t", dates=pd.bdate_range("2019-11-01", periods=49))
+    with_nat = pd.DatetimeIndex(pd.bdate_range("2019-11-01", periods=50))
+    with_nat = with_nat.insert(25, pd.NaT)[:50]
+    with pytest.raises(ValueError, match="must be sorted"):
+        charts.equity_drawdown_svg(TWO, "t", dates=with_nat)  # a NaT breaks monotonicity, so it is rejected too
+    repeated = pd.DatetimeIndex(["2019-12-31"] * 25 + ["2020-01-02"] * 25)
+    assert x_labels(charts.equity_drawdown_svg(TWO, "t", dates=repeated))[0] == ["2020"]  # repeated dates are sorted, one tick
 
 
 def test_main_labels_years_only_for_csv_data(tmp_path):
