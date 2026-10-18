@@ -68,6 +68,8 @@ def _x_marks(n: int, dates: pd.DatetimeIndex | None) -> tuple[list[tuple[float, 
         return [(v, _label(v, step)) for v in ticks if v <= n - 1], "bar"
     if len(dates) != n:
         raise ValueError("dates must have one entry per bar")
+    if not dates.is_monotonic_increasing:
+        raise ValueError("dates must be sorted: a year tick marks the first bar of the year")
     years = np.asarray(dates.year)
     starts = [i for i in range(1, n) if years[i] != years[i - 1]]
     if not starts:

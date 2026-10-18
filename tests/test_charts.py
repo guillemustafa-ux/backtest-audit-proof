@@ -38,6 +38,16 @@ def test_equity_svg_has_two_polylines_per_panel_and_the_final_equity_in_the_lege
     assert f"Claim, final {np.prod(1.0 + CLAIM):.2f}x" in svg and f"Corrected, final {np.prod(1.0 + CORRECTED):.2f}x" in svg
 
 
+def test_styles_accepts_two_or_three_curves_and_refuses_fewer_or_more():
+    assert [cls for cls, _, _ in charts._styles(2)] == ["claim", "corrected"]
+    assert [cls for cls, _, _ in charts._styles(3)] == ["claim", "step", "corrected"]
+    for bad in (0, 1, 4):
+        with pytest.raises(ValueError, match="two or three curves"):
+            charts._styles(bad)
+    with pytest.raises(ValueError, match="two or three curves"):
+        charts.equity_drawdown_svg([("only", CLAIM)], "t")
+
+
 def test_equity_svg_draws_one_intermediate_step_dashed_and_refuses_a_fourth_curve():
     step = np.array([0.002, -0.001, 0.0, 0.001, -0.002] * 10)
     svg = charts.equity_drawdown_svg([("Claim", CLAIM), ("Look-ahead removed only", step), ("Corrected", CORRECTED)], "t")
@@ -165,6 +175,9 @@ def test_equity_x_axis_shows_years_when_dates_are_given():
     assert labels == ["2015", "2017", "2019", "2021", "2023", "2025"]
     _, title = x_labels(charts.equity_drawdown_svg(TWO, "t"))
     assert title == ["bar"]  # without dates the axis stays in bars
+    unsorted = pd.bdate_range("2019-11-01", periods=50)[::-1]
+    with pytest.raises(ValueError, match="must be sorted"):
+        charts.equity_drawdown_svg(TWO, "t", dates=unsorted)
     with pytest.raises(ValueError, match="one entry per bar"):
         charts.equity_drawdown_svg(TWO, "t", dates=pd.bdate_range("2019-11-01", periods=49))
 
