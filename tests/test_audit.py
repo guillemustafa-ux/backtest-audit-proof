@@ -81,6 +81,10 @@ def test_random_control_percentile_in_range():
     r = steps.random_control(PRICES, PARAMS, n_controls=50, seed=3)
     assert 0.0 <= r["percentile"] <= 100.0
     assert r["controls"] == 50
+    assert r["band_series"].shape == (50, len(PRICES)) and np.isfinite(r["band_series"]).all()
+    # the band pays the cost the chart compares it against; the percentile does not, so it is unchanged
+    paid = steps.random_control(PRICES, PARAMS, n_controls=50, seed=3, cost_bps=20.0)
+    assert paid["percentile"] == r["percentile"] and paid["band_series"].sum() < r["band_series"].sum()
 
 
 def test_bh_fdr_basic():

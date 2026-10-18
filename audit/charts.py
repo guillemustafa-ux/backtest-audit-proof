@@ -18,8 +18,10 @@ import pandas as pd
 WIDTH, LEFT, RIGHT = 760, 64, 20
 CLAIM, CORRECTED = "#2a78d6", "#eb6834"      # categorical slots 1 and 2 of the palette, CVD-safe as a pair
 STEP = "#1baf7a"                             # slot 3: with 1 and 2 the only trio that clears every colour-vision check on all pairs
+BAND_QUANTILES = (5.0, 95.0)                 # the random-entry envelope: a neutral fill under the curves, not a fourth hue
 HEAT_LOW, HEAT_HIGH = "#cde2fb", "#0d366b"   # one-hue sequential ramp, light to dark
 INK, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
+HALO = f' stroke="{SURFACE}" stroke-width="3" paint-order="stroke"'   # text over curves or the band stays legible
 MAX_POINTS = 600                             # at most this many buckets per curve; each draws its first bar and its extremes
 EQ_TOP, EQ_BOT, DD_TOP, DD_BOT, EQ_HEIGHT = 66, 306, 330, 470, 514   # two subtitle lines between the title and the first panel
 
@@ -107,7 +109,8 @@ def _styles(count: int) -> list[tuple[str, str, str]]:
     return [("claim", CLAIM, "")] + [("step", STEP, "6 4")] * (count - 2) + [("corrected", CORRECTED, "")]
 
 
-def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title: str, subtitles: Sequence[str] = ()) -> str:
+def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title: str, subtitles: Sequence[str] = (),
+                        band: np.ndarray | None = None, band_name: str = "") -> str:
     """Two stacked panels: equity compounded from 1.0 for every daily series on a log axis, so a claim at 46000x and
     a corrected curve at 0.5x are both visible, and the drawdown from the running peak on a linear axis (the peak
     starts at 1.0, as in `stats.max_drawdown`). `curves` is (legend name, daily returns) in drawing order: the claim
@@ -116,6 +119,10 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
     on the surface, so its identity cannot rest on colour alone); two end labels overlap only when two finals land
     within about 12 px on the log axis, and the legend repeats every value. Up to two subtitle lines say what each
     curve is, because the chart travels without the report.
+
+    `band`, one row of daily returns per control run, draws the bar-by-bar 5th to 95th percentile of the runs'
+    equity as a neutral fill under the curves of the equity panel, with `band_name` in the legend; the drawdown
+    panel does not get it. An empty band draws nothing.
     """
     if isinstance(subtitles, str) or len(subtitles) > 2:
         raise ValueError("subtitles is a sequence of at most two lines, which is what fits between the title and the first panel")
@@ -124,11 +131,17 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
     n = len(series[0])
     if n < 2 or any(len(s) != n or not np.isfinite(s).all() or (s <= -1.0).any() for s in series):
         raise ValueError("every series needs the same length of at least 2, finite values and every return above -1, so that equity stays positive")
+    band = None if band is None or len(band) == 0 else np.asarray(band, dtype=float)
+    if band is not None and (band.ndim != 2 or band.shape[1] != n or not np.isfinite(band).all() or (band <= -1.0).any()):
+        raise ValueError("band needs one row of daily returns per run, each as long as the curves, finite and above -1")
     equity = [np.cumprod(1.0 + s) for s in series]
     drawdown = [e / np.maximum(np.maximum.accumulate(e), 1.0) - 1.0 for e in equity]
+    edges = None if band is None else np.percentile(np.cumprod(1.0 + band, axis=1), BAND_QUANTILES, axis=0)
     x_ticks, x_step = _ticks(0.0, float(n - 1), 5)
     x_ticks = [v for v in x_ticks if v <= n - 1]  # the axis ends at the last bar: no tick or gridline beyond it
     eq_lo, eq_hi = min(e.min() for e in equity), max(e.max() for e in equity)
+    if edges is not None:
+        eq_lo, eq_hi = min(eq_lo, edges[0].min()), max(eq_hi, edges[1].max())
     eq_ticks = _log_ticks(eq_lo, eq_hi)
     dd_ticks, dd_step = _ticks(min(min(d.min() for d in drawdown), -0.01), 0.0, 3)
     sx = _scale(0.0, float(n - 1), LEFT, WIDTH - RIGHT)
@@ -139,6 +152,12 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
     body = [f'<text x="{WIDTH / 2:.1f}" y="{38 + 14 * i}" text-anchor="middle" fill="{MUTED}">{escape(line)}</text>' for i, line in enumerate(subtitles)]
     for top, bot, ticks, labels, sy, data, name in panels:
         body.append(f'<rect x="{LEFT}" y="{top}" width="{WIDTH - LEFT - RIGHT}" height="{bot - top}" fill="none" stroke="{AXIS}"/>')
+        if top == EQ_TOP and edges is not None:
+            # the envelope goes under the gridlines and the curves: upper edge forward, lower edge back, each thinned
+            keep = np.union1d(_thin(edges[1]), _thin(edges[0]))
+            xs = sx(keep.astype(float))
+            outline = list(zip(xs, sy(edges[1][keep]))) + list(zip(xs[::-1], sy(edges[0][keep])[::-1]))
+            body.append(f'<polygon class="band" fill="{AXIS}" fill-opacity="0.45" points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in outline)}"/>')
         for v, label in zip(ticks, labels):
             y = sy(v)
             body.append(f'<line x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}" stroke="{GRID}"/>')
@@ -158,12 +177,16 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
         y = EQ_TOP + 16 + 16 * i
         dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         body.append(f'<line x1="{LEFT + 10}" y1="{y - 4}" x2="{LEFT + 26}" y2="{y - 4}" stroke="{colour}" stroke-width="1.5"{dash_attr}/>')
-        body.append(f'<text class="legend" x="{LEFT + 32}" y="{y}" font-size="12">{escape(name)}, final {e[-1]:.2f}x</text>')
+        body.append(f'<text class="legend" x="{LEFT + 32}" y="{y}" font-size="12"{HALO}>{escape(name)}, final {e[-1]:.2f}x</text>')
         # direct label at the curve's end, in text ink with a surface halo so it stays legible over the other curves;
         # a curve that ends on the frame top gets its label just above the frame instead of over its own last pixels
         label_y = eq_sy(e[-1]) - 4
         label_y = EQ_TOP - 3 if label_y < EQ_TOP + 12 else min(label_y, EQ_BOT - 2)
-        body.append(f'<text class="end-label {cls}" x="{WIDTH - RIGHT - 4}" y="{label_y:.1f}" text-anchor="end" stroke="{SURFACE}" stroke-width="3" paint-order="stroke">{e[-1]:.2f}x</text>')
+        body.append(f'<text class="end-label {cls}" x="{WIDTH - RIGHT - 4}" y="{label_y:.1f}" text-anchor="end"{HALO}>{e[-1]:.2f}x</text>')
+    if edges is not None:
+        y = EQ_TOP + 16 + 16 * len(curves)
+        body.append(f'<rect x="{LEFT + 10}" y="{y - 8}" width="16" height="8" fill="{AXIS}" fill-opacity="0.45"/>')
+        body.append(f'<text class="legend band" x="{LEFT + 32}" y="{y}" font-size="12"{HALO}>{escape(band_name)}</text>')
     return _svg(WIDTH, EQ_HEIGHT, title, body)
 
 
@@ -211,7 +234,7 @@ def sensitivity_svg(surface: dict[tuple[float, float, float], float], chosen: tu
 def write_charts(result: dict, out_path: str) -> dict[str, str]:
     """Write both charts under charts/ next to the report and return their report-relative posix paths."""
     out, p = Path(out_path), result["params"]
-    series, cost_bps = result["risk"]["series"], result["costs"]["cost_bps"]
+    series, cost_bps, control = result["risk"]["series"], result["costs"]["cost_bps"], result["control"]
     curves = [("Claim", series["claim"]), ("Look-ahead removed only", series["no_lookahead"]), ("Corrected", series["corrected"])]
     svgs = {
         "equity": equity_drawdown_svg(
@@ -221,6 +244,8 @@ def write_charts(result: dict, out_path: str) -> dict[str, str]:
                 "claim as submitted; dashed: only the look-ahead removed (ambiguous bars still booked to the target, no cost)",
                 f"corrected: look-ahead removed, ambiguous bars booked to the stop, {cost_bps:.0f} bps per round trip",
             ),
+            band=control["band_series"],
+            band_name=f"{control['controls']} matched random-entry runs, same cost: {BAND_QUANTILES[0]:.0f}-{BAND_QUANTILES[1]:.0f}% band",
         ),
         "sensitivity": sensitivity_svg(result["sensitivity"]["surface"], (p.lookback, p.target_atr, p.stop_atr), "Naive Sharpe across the parameter grid"),
     }

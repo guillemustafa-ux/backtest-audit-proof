@@ -156,8 +156,13 @@ def walk_forward(prices: pd.DataFrame, grid: list[Params] | None = None, split: 
 
 # --- 9. matched random-entry control -----------------------------------------------------------
 
-def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, seed: int = 0) -> dict:
-    """Random entries with the strategy's trade count, holding-period distribution and stop width."""
+def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, seed: int = 0, cost_bps: float = 0.0) -> dict:
+    """Random entries with the strategy's trade count, holding-period distribution and stop width.
+
+    The percentile compares Sharpes with no cost on either side, as row 9 reports. `band_series` carries every
+    control's daily mark-to-market returns charged `cost_bps` per round trip (one row per control), so the equity
+    chart can draw the controls' envelope behind the corrected run, which pays the same cost.
+    """
     strategy = run(prices, params, HONEST)
     s_strat = sharpe(daily_returns(prices, strategy))
     holds = np.array([t.hold for t in strategy])
@@ -167,6 +172,7 @@ def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, 
     rng = np.random.default_rng(seed)
     control_sharpes = []
     control_trades = []
+    control_daily = []
     for _ in range(n_controls):
         # Entry dates spread over the whole sample, like the strategy's; overlaps are dropped by the walk.
         entries = np.zeros(len(prices), dtype=bool)
@@ -177,6 +183,7 @@ def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, 
         trades = _walk(prices, entries, params, HONEST, a, holds=hold_at)
         control_trades.append(len(trades))
         control_sharpes.append(sharpe(daily_returns(prices, trades)))
+        control_daily.append(daily_returns(prices, trades, cost_bps).to_numpy())
     control_sharpes = np.array(control_sharpes)
     return {
         "strategy_sharpe": float(s_strat), "controls": n_controls,
@@ -184,6 +191,7 @@ def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, 
         "percentile": float((control_sharpes < s_strat).mean() * 100.0),
         "matched_trades": n_trades, "control_trades_mean": float(np.mean(control_trades)),
         "median_hold": float(np.median(holds)) if len(holds) else 0.0,
+        "cost_bps": cost_bps, "band_series": np.array(control_daily).reshape(n_controls, len(prices)),
     }
 
 
