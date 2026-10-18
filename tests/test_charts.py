@@ -255,6 +255,29 @@ def test_write_charts_returns_relative_posix_paths(tmp_path):
     assert equity.count('class="band"') == 1 and "3 matched random-entry runs, same cost: 5-95% band" in equity  # and so does the band
 
 
+def test_legend_sits_on_an_opaque_box_over_the_gridlines_and_under_the_curves():
+    svg = charts.equity_drawdown_svg(TWO, "t", band=np.zeros((3, 50)), band_name="band")
+    lines = svg.splitlines()
+    box = [i for i, line in enumerate(lines) if 'class="legend-box"' in line]
+    assert len(box) == 1  # one box, in the equity panel only
+    grid = [i for i, line in enumerate(lines) if f'stroke="{charts.GRID}"' in line]
+    curves = [i for i, line in enumerate(lines) if line.startswith("<polyline")]
+    assert max(i for i in grid if i < curves[0]) < box[0] < curves[0]  # hides the equity gridlines, never a curve
+    rect = _root(svg).find(f'.//{SVG}rect[@class="legend-box"]')
+    assert rect.get("fill") == charts.SURFACE and rect.get("height") == str(16 * 3)  # two curves and the band
+    assert float(rect.get("width")) >= 28 + charts.LEGEND_CHAR_PX * len("Corrected, final 1.00x")
+
+
+def test_fractional_cost_is_printed_as_given_not_rounded(tmp_path):
+    result = {"params": Params(*CHOSEN), "costs": {"cost_bps": 12.5}, "risk": {"series": {"claim": CLAIM, "no_lookahead": np.zeros(50), "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE},
+              "control": {"controls": 3, "band_series": np.zeros((3, 50))}}
+    paths = charts.write_charts(result, str(tmp_path / "AUDIT_REPORT.md"))
+    assert "ambiguous bars booked to the stop, 12.5 bps per round trip" in (tmp_path / paths["equity"]).read_text(encoding="utf-8")
+    text = report.render(report.run_audit(synthetic_prices(500, seed=11), GRID, n_controls=3, cost_bps=12.5), "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
+    assert "audit applies 12.5 bps round trip" in text and "charged the same 12.5 bps" in text and "With 12.5 bps of round-trip cost" in text
+    assert " 12 bps" not in text and " 13 bps" not in text  # `.0f` printed 12.5 as 12
+
+
 def test_ordinal_suffixes_and_nan():
     assert [report._ordinal(v) for v in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 100, 101, 111, 99.6, 67.4)] == [
         "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "100th", "101st", "111th", "100th", "67th"]

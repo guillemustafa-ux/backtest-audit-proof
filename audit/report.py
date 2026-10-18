@@ -39,7 +39,7 @@ def _band_sentence(rc: dict, rk: dict) -> str:
     rank = (finals < corrected_final).mean() * 100.0
     lo, hi = BAND_QUANTILES
     return (f" The shaded band is, bar by bar, the {_ordinal(lo)} to {_ordinal(hi)} percentile of the equity of the {rc['controls']} matched random-entry runs of row 9, "
-            f"charged the same {rc['cost_bps']:.0f} bps as the corrected run; the corrected run's final equity sits at the {_ordinal(rank)} percentile of theirs. "
+            f"charged the same {rc['cost_bps']:g} bps as the corrected run; the corrected run's final equity sits at the {_ordinal(rank)} percentile of theirs. "
             f"Row 9 ranks the cost-free Sharpe ratio instead, where the strategy sits at the {_ordinal(rc['percentile'])}: two statistics over the same runs.")
 
 
@@ -99,7 +99,7 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
         "|---|---|---|---|---|",
         f"| 1 | Look-ahead: the signal uses the close of the bar it enters on | Sharpe {_f(la['before']['sharpe'])} | Sharpe {_f(la['after']['sharpe'])} | {_sev(la['before']['sharpe'] - la['after']['sharpe'])} |",
         f"| 2 | Same-bar ambiguity resolved in favour of the target ({sb['ambiguous_bars']} of {sb['trades']} exits) | Sharpe {_f(sb['before']['sharpe'])} | Sharpe {_f(sb['after']['sharpe'])} | {_sev(sb['before']['sharpe'] - sb['after']['sharpe'])} |",
-        f"| 3 | Zero transaction costs (audit applies {co['cost_bps']:.0f} bps round trip) | Sharpe {_f(co['before']['sharpe'])} | Sharpe {_f(co['after']['sharpe'])} | {_sev(co['before']['sharpe'] - co['after']['sharpe'])} |",
+        f"| 3 | Zero transaction costs (audit applies {co['cost_bps']:g} bps round trip) | Sharpe {_f(co['before']['sharpe'])} | Sharpe {_f(co['after']['sharpe'])} | {_sev(co['before']['sharpe'] - co['after']['sharpe'])} |",
         f"| 4 | Overlapping {wi['horizon']}-bar forward-return windows counted as independent | t = {_f(wi['t_naive'])} on N = {wi['raw_n']} | t = {_f(wi['t_corrected'])} (Newey-West), {_f(wi['t_bootstrap'])} (block bootstrap), effective N = {wi['effective_n']:.0f} | {_sev_t(wi['t_naive'], wi['t_corrected'])} |",
         f"| 5 | Event returns tested against zero instead of the baseline | t vs 0 = {_f(ba['t_vs_zero'])} | t vs baseline = {_f(ba['t_vs_baseline'])} (i.i.d.), {_f(ba['t_vs_baseline_nw'])} (Newey-West, p = {ba['p_vs_baseline_nw']:.2f}), excess {_pct(ba['excess_mean'])} per window | {_sev_t(ba['t_vs_zero'], ba['t_vs_baseline_nw'])} |",
         f"| 6 | One-sided test chosen after seeing the sign | p = {ts['p_one_sided']:.3f} | p = {ts['p_two_sided']:.3f} (two-sided) | {'material' if ts['p_one_sided'] < 0.05 <= ts['p_two_sided'] else 'minor'} |",
@@ -127,7 +127,7 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
         f"| Worst day | {_pct(cl['worst_day'])} | {_pct(cr['worst_day'])} |",
         f"| Expected shortfall, worst 5% of days (flat days count as 0) | {_pct(cl['es_5'])} | {_pct(cr['es_5'])} |",
         "",
-        f"The corrected column is the same strategy with look-ahead removed, ambiguous bars booked to the stop and {co['cost_bps']:.0f} bps charged per round trip; "
+        f"The corrected column is the same strategy with look-ahead removed, ambiguous bars booked to the stop and {co['cost_bps']:g} bps charged per round trip; "
         "it is what the risk figures would have been had the backtest been built correctly.",
         "",
     ]
@@ -237,7 +237,7 @@ def _weaknesses(r: dict) -> list[str]:
     if sb["ambiguous_bars"] > 0:
         out.append(f"{sb['ambiguous_bars']} exits are ambiguous within the bar; resolving them in the strategy's favour is worth {_f(d)} Sharpe points.")
     d = co["before"]["sharpe"] - co["after"]["sharpe"]
-    out.append(f"With {co['cost_bps']:.0f} bps of round-trip cost the Sharpe falls by {_f(d)}; the claim assumes costless execution.")
+    out.append(f"With {co['cost_bps']:g} bps of round-trip cost the Sharpe falls by {_f(d)}; the claim assumes costless execution.")
     if wi["effective_n"] < wi["raw_n"] * 0.7:
         out.append(f"The {wi['raw_n']} signal windows are not independent: effective N is about {wi['effective_n']:.0f}, so the naive t-statistic overstates the evidence.")
     if mt["significant_after_fdr"] < mt["significant_raw"]:
