@@ -15,6 +15,13 @@ from audit.data import load_csv, synthetic_prices, synthetic_universe
 from audit.report import render, run_audit
 
 
+def _non_negative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m audit")
     ap.add_argument("--seed", type=int, default=7)
@@ -22,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--csv", help="daily OHLC CSV instead of synthetic data")
     ap.add_argument("--controls", type=int, default=300, help="random-entry control runs")
     ap.add_argument("--cost-bps", type=float, default=20.0)
-    ap.add_argument("--universe", type=int, default=40, help="symbols in the synthetic universe of the survivorship row; 0 disables the row")
+    ap.add_argument("--universe", type=_non_negative_int, default=40, help="symbols in the synthetic universe of the survivorship row; 0 disables the row")
     ap.add_argument("--out", default="AUDIT_REPORT.md")
     args = ap.parse_args(argv)
 

@@ -19,6 +19,13 @@ def test_max_drawdown_on_hand_made_series():
     assert st.max_drawdown(np.array([-0.2, 0.3]))[1:] == (1, False)  # back above the peak on the last bar
 
 
+def test_not_recovered_flags_only_the_longest_run():
+    # four bars under the starting peak, recovered on bar 5, then a deeper two-bar run still open at the end:
+    # the longest run is the recovered one, so the label does not apply even though the series ends under water
+    dd, bars, not_recovered = st.max_drawdown(np.array([-0.1, 0.0, 0.0, 0.0, 0.2, -0.3, 0.0]))
+    assert np.isclose(dd, 0.3) and bars == 4 and not not_recovered
+
+
 def test_max_drawdown_of_flat_or_empty_series_is_zero():
     assert st.max_drawdown(np.zeros(50)) == (0.0, 0, False)
     assert st.max_drawdown(np.array([])) == (0.0, 0, False)

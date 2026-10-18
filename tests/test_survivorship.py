@@ -52,6 +52,22 @@ def test_open_position_is_closed_at_the_delisting_close():
     assert run(sym, wide, steps.HONEST)[-1].exit_idx == 31  # on the full history the same trade runs its 10 bars
 
 
+def test_symbol_with_no_trades_contributes_a_zero_sharpe_not_nan():
+    quiet = _frame([100.0] * 8 + [40.0])  # delisted inside the ATR warm-up: no trade can open, its daily series is all zeros
+    active = synthetic_prices(300, seed=3)
+    r = steps.survivorship([active, quiet], PARAMS)
+    assert r["delisted"] == 1 and r["survivors"] == 1
+    assert np.isfinite(r["point_in_time_mean_symbol_sharpe"]) and np.isfinite(r["point_in_time_sharpe"])
+    assert r["survivors_mean_symbol_sharpe"] != 0.0
+    assert r["point_in_time_mean_symbol_sharpe"] == pytest.approx(r["survivors_mean_symbol_sharpe"] / 2)  # the quiet symbol adds a 0.0
+
+
+def test_cli_rejects_a_negative_universe(tmp_path):
+    from audit.__main__ import main
+    with pytest.raises(SystemExit):
+        main(["--universe", "-1", "--bars", "300", "--controls", "2", "--out", str(tmp_path / "r.md")])
+
+
 def test_survivors_only_universe_shows_drift_the_point_in_time_universe_lacks():
     r = steps.survivorship(synthetic_universe(40, 3000, 7), PARAMS)
     assert r["delisted"] > 0 and r["survivors"] + r["delisted"] == 40
