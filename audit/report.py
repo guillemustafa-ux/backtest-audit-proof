@@ -53,7 +53,6 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
     sv = r.get("survivorship")
     honest_sharpe = co["after"]["sharpe"]
     cl, cr = rk["claim"], rk["corrected"]
-    last_row = 11 if sv else 10
     lines = [
         "# Backtest methodology audit",
         "",
@@ -80,22 +79,26 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
         f"| 7 | Best of {mt['variants']} variants reported without multiple-testing control | {mt['significant_raw']} variants significant at 5% | {mt['significant_after_fdr']} after Benjamini-Hochberg; expected best Sharpe from noise alone {_f(mt['expected_max_sharpe_noise'])}; deflated-Sharpe probability {_f(mt['deflated_sharpe_prob'])} | {'material' if mt['deflated_sharpe_prob'] < 0.95 else 'minor'} |",
         f"| 8 | Parameters optimized on the full sample, no holdout | in-sample Sharpe {_f(wf['sharpe_in_sample'])} ({wf['train_bars']} bars) | holdout Sharpe {_f(wf['sharpe_holdout'])} ({wf['holdout_bars']} bars, touched once) | {_sev(wf['sharpe_in_sample'] - wf['sharpe_holdout'])} |",
         f"| 9 | No random-entry control | strategy Sharpe {_f(rc['strategy_sharpe'])} | {rc['controls']} matched random-entry runs: mean {_f(rc['control_mean'])}, sd {_f(rc['control_sd'])}; strategy at the {rc['percentile']:.0f}th percentile | {'material' if rc['percentile'] < 95 else 'minor'} |",
-        f"| 10 | Only the best parameter point is reported; the surface around it is hidden | reported variant Sharpe {_f(se['reported_sharpe'])} (rank {se['rank']} of {len(se['surface'])}) | its {se['neighbours']} one-step neighbours: mean {_f(se['neighbour_mean'])} (min {_f(se['neighbour_min'])}, max {_f(se['neighbour_max'])}); grid median {_f(se['grid_median'])}; {_pct(se['share_within_0_3'])} of neighbours within 0.3 Sharpe | {_sev(se['reported_sharpe'] - se['neighbour_mean'])} |",
-        *([f"| 11 | Universe taken as of today: {sv['delisted']} of {sv['n_symbols']} symbols that fell below {sv['floor']:.0%} of their start were dropped from the history | survivors only ({sv['survivors']} symbols): Sharpe {_f(sv['survivors_sharpe'])}, mean total return {_pct(sv['survivors_mean_total_return'])} | point-in-time universe ({sv['n_symbols']} symbols, each until its delisting): Sharpe {_f(sv['point_in_time_sharpe'])}, mean total return {_pct(sv['all_mean_total_return'])} | {_sev(sv['survivors_sharpe'] - sv['point_in_time_sharpe'])} |"] if sv else []),
+        f"| 10 | Only the best parameter point is reported; the surface around it is hidden | reported variant Sharpe {_f(se['reported_sharpe'])} (rank {se['rank']} of {len(se['surface'])}) | its {se['neighbours']} one-step neighbours: mean {_f(se['neighbour_mean'])} (min {_f(se['neighbour_min'])}, max {_f(se['neighbour_max'])}), {se['within_0_3']} of {se['neighbours']} within 0.3 of the reported value; grid median {_f(se['grid_median'])} | {'material' if _spike(se) else 'minor'} |",
+        *([f"| 11 | Universe taken as of today: {sv['delisted']} of {sv['n_symbols']} symbols that fell below {sv['floor']:.0%} of their start were dropped from the history | survivors only ({sv['survivors']} symbols): mean per-symbol Sharpe {_f(sv['survivors_mean_symbol_sharpe'])}, symbols' mean buy-and-hold return {_pct(sv['survivors_mean_price_return'])} | point-in-time universe ({sv['n_symbols']} symbols, each until its delisting): mean per-symbol Sharpe {_f(sv['point_in_time_mean_symbol_sharpe'])}, symbols' mean buy-and-hold return {_pct(sv['all_mean_price_return'])} | {_sev(sv['survivors_mean_symbol_sharpe'] - sv['point_in_time_mean_symbol_sharpe'])} |"] if sv else []),
         "",
         "Rows 1-3 are corrections to the backtest itself and compound: after all three the honest Sharpe is "
-        f"{_f(honest_sharpe)}. Rows 4-{last_row} are corrections to the evidence: they do not change the returns, they change how much the returns prove.",
+        f"{_f(honest_sharpe)}. Rows 4-10 are corrections to the evidence: they do not change the returns, they change how much the returns prove. "
+        "Row 10 reads the parameter surface: a plateau says the result does not hinge on one grid point, not that it is real; every variant on the plateau carries the same artifacts as rows 1-3."
+        + (f" Row 11 corrects the data, not the evidence: honest rules, no cost, on a separate {sv['n_symbols']}-symbol synthetic universe, so its Sharpe is not comparable with the {_f(honest_sharpe)} of rows 1-3; "
+           f"on the as-of-today universe the surviving symbols carry {(sv['survivors_mean_price_return'] - sv['all_mean_price_return']) * 100:.0f} points more buy-and-hold drift than the point-in-time universe, and this strategy captures little of it." if sv else ""),
         "",
         "## Risk and exposure, claim vs corrected",
         "",
         "| Metric | Claim (as submitted) | Corrected (rows 1-3 applied) |",
         "|---|---|---|",
-        f"| Max drawdown | {_pct(cl['max_drawdown'])} over {cl['drawdown_bars']} bars | {_pct(cr['max_drawdown'])} over {cr['drawdown_bars']} bars |",
+        f"| Max drawdown | {_pct(cl['max_drawdown'])} | {_pct(cr['max_drawdown'])} |",
+        f"| Longest time under water | {_under_water(cl)} | {_under_water(cr)} |",
         f"| Annualised volatility | {_pct(cl['ann_vol'])} | {_pct(cr['ann_vol'])} |",
         f"| Exposure (share of bars in a position) | {_pct(cl['exposure'])} | {_pct(cr['exposure'])} |",
         f"| Turnover (trades per year) | {_f(cl['trades_per_year'], 1)} | {_f(cr['trades_per_year'], 1)} |",
         f"| Worst day | {_pct(cl['worst_day'])} | {_pct(cr['worst_day'])} |",
-        f"| Expected shortfall, worst 5% of days | {_pct(cl['es_5'])} | {_pct(cr['es_5'])} |",
+        f"| Expected shortfall, worst 5% of days (flat days count as 0) | {_pct(cl['es_5'])} | {_pct(cr['es_5'])} |",
         "",
         f"The corrected column is the same strategy with look-ahead removed, ambiguous bars booked to the stop and {co['cost_bps']:.0f} bps charged per round trip; "
         "it is what the risk figures would have been had the backtest been built correctly.",
@@ -110,7 +113,7 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
             f"![Naive Sharpe across the parameter grid at the chosen stop]({charts['sensitivity']})",
             "",
             "Both charts are generated by `python -m audit` as plain SVG; the equity panel compounds the daily mark-to-market returns from 1.0 on a log axis, "
-            "the lower panel is the drawdown from the running peak.",
+            f"the lower panel is the drawdown from the running peak. The heatmap is the stop = {p.stop_atr} ATR slice of the grid; the neighbours along the stop axis are not in it.",
             "",
         ]
     lines += ["## Material weaknesses", ""]
@@ -171,6 +174,15 @@ def _sev(delta: float) -> str:
     return "minor"
 
 
+def _spike(se: dict) -> bool:
+    """The reported point is a spike when its one-step neighbours average less than half of it; otherwise it sits on a plateau."""
+    return se["neighbour_mean"] < 0.5 * se["reported_sharpe"]
+
+
+def _under_water(p: dict) -> str:
+    return f"{p['drawdown_bars']} bars" + (" (not recovered)" if p["not_recovered"] else "")
+
+
 def _sev_t(t_before: float, t_after: float) -> str:
     """Severity of an evidence artifact: it matters when it manufactures significance."""
     if abs(t_before) >= 1.96 > abs(t_after):
@@ -200,11 +212,10 @@ def _weaknesses(r: dict) -> list[str]:
         out.append(f"The in-sample Sharpe of {_f(wf['sharpe_in_sample'])} becomes {_f(wf['sharpe_holdout'])} on a holdout that was never used for selection.")
     if rc["percentile"] < 95:
         out.append(f"Random entries with the same trade count, holding periods and stop width reach the strategy's Sharpe in {100 - rc['percentile']:.0f}% of runs; the entry rule adds nothing measurable.")
-    d = se["reported_sharpe"] - se["neighbour_mean"]
-    if d >= 0.3:
+    if _spike(se):
         out.append(f"The reported parameters sit on a spike: their one-step neighbours average a Sharpe of {_f(se['neighbour_mean'])} against the reported {_f(se['reported_sharpe'])}, so the result depends on one point of the grid.")
-    if sv and sv["survivors_sharpe"] - sv["point_in_time_sharpe"] >= 0.3:
-        out.append(f"The as-of-today universe removes the {sv['delisted']} symbols that failed; survivors alone show a Sharpe of {_f(sv['survivors_sharpe'])} against {_f(sv['point_in_time_sharpe'])} on the point-in-time universe.")
+    if sv and sv["survivors_mean_symbol_sharpe"] - sv["point_in_time_mean_symbol_sharpe"] >= 0.3:
+        out.append(f"The as-of-today universe removes the {sv['delisted']} symbols that failed; survivors alone show a mean per-symbol Sharpe of {_f(sv['survivors_mean_symbol_sharpe'])} against {_f(sv['point_in_time_mean_symbol_sharpe'])} on the point-in-time universe.")
     if rk["corrected"]["max_drawdown"] > rk["claim"]["max_drawdown"]:
         out.append(f"The corrected run's maximum drawdown is {_pct(rk['corrected']['max_drawdown'])} against {_pct(rk['claim']['max_drawdown'])} in the claim.")
     return out or [f"No material weakness found by the {'eleven' if sv else 'ten'} checks."]

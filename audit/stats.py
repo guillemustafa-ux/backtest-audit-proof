@@ -100,20 +100,21 @@ def deflated_sharpe(sharpe_per_period: float, n_periods: int, skew: float, kurt:
     return float(stats.norm.cdf(z))
 
 
-def max_drawdown(daily: np.ndarray | pd.Series) -> tuple[float, int]:
-    """Deepest peak-to-trough fall of the compounded equity curve, as a positive fraction, and the
-    longest run of bars spent below the running peak. Equity starts at 1.0 before the first bar.
+def max_drawdown(daily: np.ndarray | pd.Series) -> tuple[float, int, bool]:
+    """Deepest peak-to-trough fall of the compounded equity curve, as a positive fraction; the longest run
+    of bars spent below the running peak, which need not be the episode of the deepest fall; and whether
+    that longest run is still open on the last bar. Equity starts at 1.0 before the first bar.
     """
     x = np.asarray(daily, dtype=float)
     if len(x) == 0:
-        return 0.0, 0
+        return 0.0, 0, False
     equity = np.concatenate([[1.0], np.cumprod(1.0 + x)])
     drawdown = 1.0 - equity / np.maximum.accumulate(equity)
     longest = run = 0
     for below in drawdown > 0:
         run = run + 1 if below else 0
         longest = max(longest, run)
-    return float(drawdown.max()), int(longest)
+    return float(drawdown.max()), int(longest), bool(longest > 0 and run == longest)
 
 
 def expected_shortfall(daily: np.ndarray | pd.Series, alpha: float = 0.05) -> float:

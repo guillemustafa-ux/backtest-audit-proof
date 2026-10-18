@@ -3,6 +3,7 @@
 import xml.etree.ElementTree as ET
 
 import numpy as np
+import pytest
 
 from audit import charts, report, steps
 from audit.data import synthetic_prices
@@ -51,6 +52,7 @@ def test_equity_svg_renders_a_narrow_series_with_distinct_tick_labels():
 def test_equity_axis_is_log_with_nice_ticks():
     assert np.allclose(charts._log_ticks(0.45, 32.5), [0.5, 1, 2, 5, 10, 20])
     assert np.allclose(charts._log_ticks(0.99, 1.01), [0.5, 1, 2])  # widened to three ticks
+    assert np.allclose(charts._log_ticks(0.43, 46135.8), [1, 10, 100, 1000, 10000])  # more than nine ticks: powers of ten only
     svg = charts.equity_drawdown_svg(CLAIM, CORRECTED, "t")
     root = _root(svg)
     assert "equity (start 1.0, log scale)" in svg and len(list(root.iter(f"{SVG}polyline"))) == 4
@@ -78,6 +80,18 @@ def test_charts_are_deterministic_finite_and_inside_the_viewbox():
         _, _, width, height = (float(v) for v in root.get("viewBox").split())
         for poly in root.iter(f"{SVG}polyline"):
             assert all(0.0 <= x <= width and 0.0 <= y <= height for x, y in _points(poly))
+
+
+def test_equity_x_axis_ends_at_the_last_bar():
+    root = _root(charts.equity_drawdown_svg(CLAIM, CORRECTED, "t"))
+    bar_labels = [t.text for t in root.iter(f"{SVG}text") if t.get("y") == str(charts.DD_BOT + 16)]
+    assert bar_labels == ["0", "10", "20", "30", "40"]  # 50 bars: no tick at 50, the last bar is 49
+    assert all(_points(poly)[-1][0] == charts.WIDTH - charts.RIGHT for poly in root.iter(f"{SVG}polyline"))
+
+
+def test_equity_svg_rejects_a_return_at_or_below_minus_one():
+    with pytest.raises(ValueError, match="-1"):
+        charts.equity_drawdown_svg(np.array([0.0, -1.0, 0.0]), np.zeros(3), "t")
 
 
 def test_equity_svg_downsamples_long_series():

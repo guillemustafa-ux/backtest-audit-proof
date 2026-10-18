@@ -220,11 +220,11 @@ def parameter_sensitivity(prices: pd.DataFrame, grid: list[Params], params: Para
     near = np.array([surface[_key(p)] for p in near_params])
     values = np.array(list(surface.values()))
     return {
-        "rules": "naive" if rules == NAIVE else "honest", "reported_sharpe": float(reported),
-        "neighbour_sharpes": [float(s) for s in near],
+        "rules": "naive" if rules == NAIVE else "honest" if rules == HONEST else "custom", "reported_sharpe": float(reported),
+        "neighbour_params": [_key(p) for p in near_params], "neighbour_sharpes": [float(s) for s in near],
         "neighbour_mean": float(near.mean()), "neighbour_min": float(near.min()), "neighbour_max": float(near.max()),
         "neighbours": int(len(near)), "grid_median": float(np.median(values)), "grid_mean": float(values.mean()),
-        "share_within_0_3": float((np.abs(near - reported) <= 0.3).mean()),
+        "within_0_3": int((np.abs(near - reported) <= 0.3).sum()),
         "surface": surface, "rank": int((values > reported).sum()) + 1,
     }
 
@@ -236,6 +236,11 @@ def _delisting_bar(prices: pd.DataFrame, floor: float) -> int | None:
     close = prices["close"].to_numpy()
     below = np.nonzero(close < floor * close[0])[0]
     return int(below[0]) if len(below) else None
+
+
+def _history(prices: pd.DataFrame, delisting_bar: int | None) -> pd.DataFrame:
+    """The symbol's data as the point-in-time universe sees it: all of it for a survivor, up to and including the delisting bar otherwise."""
+    return prices if delisting_bar is None else prices.iloc[: delisting_bar + 1]
 
 
 def _equal_weight(series: list[pd.Series], bars: int) -> pd.Series:
@@ -253,22 +258,28 @@ def survivorship(universe: list[pd.DataFrame], params: Params, floor: float = 0.
 
     A symbol is delisted on the first bar whose close is below `floor` times its first close; from that bar on
     its data does not exist. Each symbol runs the strategy on its own history (the whole sample for a survivor,
-    the truncated one otherwise; the engine's time exit at the last bar closes whatever is open) and each
-    universe is the equal-weight mean of the daily mark-to-market returns of the symbols alive on that bar.
+    the truncated one otherwise; the engine's time exit at the last bar closes whatever is open).
+
+    `*_mean_symbol_sharpe` is the mean of the per-symbol Sharpes, each over the symbol's own history: the number
+    the report compares. `*_sharpe` is the equal-weight portfolio of the symbols alive on each bar; it is kept
+    for reference but a 23-symbol portfolio and one that fades from 40 to 23 do not diversify alike, so the
+    two are not comparable. `*_mean_price_return` is the symbols' buy-and-hold change, not the strategy's return.
     """
     bars = max(len(p) for p in universe)
     delisted_at = [_delisting_bar(p, floor) for p in universe]
-    histories = [p if bar is None else p.iloc[: bar + 1] for p, bar in zip(universe, delisted_at)]
+    histories = [_history(p, bar) for p, bar in zip(universe, delisted_at)]
     trades = [run(h, params, rules) for h in histories]
     daily = [daily_returns(h, t, rules.cost_bps) for h, t in zip(histories, trades)]
-    total = [float(h["close"].iloc[-1] / h["close"].iloc[0] - 1.0) for h in histories]
+    symbol_sharpes = [sharpe(d) for d in daily]
+    price_return = [float(h["close"].iloc[-1] / h["close"].iloc[0] - 1.0) for h in histories]
     survivors = [i for i, bar in enumerate(delisted_at) if bar is None]
     if not survivors:
         raise ValueError("every symbol was delisted: nothing is left to build the as-of-today universe from")
     return {
         "n_symbols": len(universe), "delisted": len(universe) - len(survivors), "survivors": len(survivors), "floor": floor,
         "survivors_sharpe": sharpe(_equal_weight([daily[i] for i in survivors], bars)), "point_in_time_sharpe": sharpe(_equal_weight(daily, bars)),
-        "survivors_mean_total_return": float(np.mean([total[i] for i in survivors])), "all_mean_total_return": float(np.mean(total)),
+        "survivors_mean_symbol_sharpe": float(np.mean([symbol_sharpes[i] for i in survivors])), "point_in_time_mean_symbol_sharpe": float(np.mean(symbol_sharpes)),
+        "survivors_mean_price_return": float(np.mean([price_return[i] for i in survivors])), "all_mean_price_return": float(np.mean(price_return)),
         "survivors_trades": sum(len(trades[i]) for i in survivors), "point_in_time_trades": sum(len(t) for t in trades),
     }
 
@@ -276,9 +287,9 @@ def survivorship(universe: list[pd.DataFrame], params: Params, floor: float = 0.
 # --- risk and exposure profile -----------------------------------------------------------------
 
 def _risk(prices: pd.DataFrame, trades: list[Trade], daily: pd.Series) -> dict:
-    dd, bars = st.max_drawdown(daily)
+    dd, bars, not_recovered = st.max_drawdown(daily)  # `bars` is the longest time under water, not the length of the deepest fall
     return {
-        "max_drawdown": dd, "drawdown_bars": bars,
+        "max_drawdown": dd, "drawdown_bars": bars, "not_recovered": not_recovered,
         "ann_vol": float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)),
         "exposure": sum(t.exit_idx - t.entry_idx + 1 for t in trades) / len(prices),
         "trades_per_year": len(trades) / (len(prices) / TRADING_DAYS),

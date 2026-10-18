@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from naive_backtest import GRID
 
+    t0 = time.perf_counter()
     universe = None
     if args.csv:
         prices, source = load_csv(args.csv), f"`{args.csv}`"
@@ -35,7 +36,6 @@ def main(argv: list[str] | None = None) -> int:
         prices, source = synthetic_prices(args.bars, args.seed), f"synthetic driftless random walk, seed {args.seed}"
         if args.universe:
             universe = synthetic_universe(args.universe, args.bars, args.seed)
-    t0 = time.perf_counter()
     result = run_audit(prices, GRID, n_controls=args.controls, cost_bps=args.cost_bps, universe=universe)
     charts = write_charts(result, args.out)
     text = render(result, source, synthetic=not args.csv, charts=charts)
