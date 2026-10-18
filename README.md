@@ -10,7 +10,7 @@ The point is not the strategy. The point is that every number in a backtest repo
 python -m venv .venv && .venv/Scripts/pip install -e ".[test]"   # Windows; on macOS/Linux use .venv/bin/pip
 python naive_backtest.py          # the claim: Sharpe 3.86, win rate 93.6%, p = 5.8e-51
 python -m audit                   # the audit: writes AUDIT_REPORT.md and charts/ in about five seconds
-python -m pytest                  # 49 tests; the artifact tests assert each artifact moves its metric the predicted way
+python -m pytest                  # 51 tests; the artifact tests assert each artifact moves its metric the predicted way
 python -m audit --csv data/btc_daily.csv --out APPENDIX_BTC.md   # same audit on real BTC daily data, offline
 ```
 
@@ -32,7 +32,7 @@ Same seed, same numbers: `AUDIT_REPORT.md` and the charts regenerate byte-identi
 | 10 | Only the best parameter point is reported; the surface around it is hidden | Report the one-step neighbourhood and the grid distribution next to the chosen variant | reported 3.86 vs its 4 neighbours averaging 3.43 (min 3.17, max 3.77), 2 of 4 within 0.3; grid median 1.65; a plateau, not a spike |
 | 11 | Universe built as of today: the symbols that failed are missing from the history (survivorship) | Point-in-time universe: every symbol until its delisting, positions closed at the delisting close | 17 of 40 synthetic symbols fell below 50% of their start; survivors only: mean per-symbol Sharpe −0.08, symbols' mean buy-and-hold return 54.3%; point-in-time: −0.18 and 9.8% |
 
-Rows 1–3 fix the backtest and compound. Rows 4–10 fix the evidence: they change how much the returns prove, not the returns. Row 10 reads the parameter surface: a plateau says the result does not hinge on one grid point, not that it is real; every variant on it carries the same artifacts as rows 1–3. Row 11 fixes the data: honest rules, no cost, on a separate 40-symbol synthetic universe, so its Sharpe is not comparable with the −0.62 of rows 1–3; the surviving symbols carry 44 points more buy-and-hold drift than the point-in-time universe, and the strategy captures little of it.
+Rows 1–3 fix the backtest and compound. Rows 4–10 fix the evidence: they change how much the returns prove, not the returns. Row 10 reads the parameter surface: a plateau says the result does not hinge on one grid point, not that it is real; every variant on it carries the same artifacts as rows 1–3. Row 11 fixes the data: honest rules, no cost, on a separate 40-symbol synthetic universe, so its Sharpe is not comparable with the −0.62 of rows 1–3; the surviving symbols carry 44.5 points more buy-and-hold return than the point-in-time universe, and the strategy captures little of it.
 
 The report ends with the four sections a methodology review is asked for: material weaknesses, required corrections, recommended methodology for the next pre-registered run, and the evidence required before confirmatory testing.
 

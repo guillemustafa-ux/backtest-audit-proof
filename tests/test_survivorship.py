@@ -45,8 +45,10 @@ def test_open_position_is_closed_at_the_delisting_close():
     wide = Params(lookback=5, target_atr=100.0, stop_atr=100.0)  # neither target nor stop is reachable: only time or the delisting closes the trade
     bar = steps._delisting_bar(sym, 0.5)
     assert bar == 24
+    sym.loc[sym.index[bar], "open"] = 45.0  # the delisting bar opens away from its close, so the exit price tells the two apart
     last = run(steps._history(sym, bar), wide, steps.HONEST)[-1]
-    assert (last.entry_idx, last.exit_idx, last.reason, last.exit_price) == (21, bar, "time", 40.0)
+    assert (last.entry_idx, last.exit_idx, last.reason) == (21, bar, "time")
+    assert last.exit_price == sym["close"].iloc[bar] == 40.0 != sym["open"].iloc[bar]
     assert run(sym, wide, steps.HONEST)[-1].exit_idx == 31  # on the full history the same trade runs its 10 bars
 
 

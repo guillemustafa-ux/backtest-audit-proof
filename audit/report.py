@@ -86,7 +86,7 @@ def render(r: dict, source: str, synthetic: bool = True, charts: dict[str, str] 
         f"{_f(honest_sharpe)}. Rows 4-10 are corrections to the evidence: they do not change the returns, they change how much the returns prove. "
         "Row 10 reads the parameter surface: a plateau says the result does not hinge on one grid point, not that it is real; every variant on the plateau carries the same artifacts as rows 1-3."
         + (f" Row 11 corrects the data, not the evidence: honest rules, no cost, on a separate {sv['n_symbols']}-symbol synthetic universe, so its Sharpe is not comparable with the {_f(honest_sharpe)} of rows 1-3; "
-           f"on the as-of-today universe the surviving symbols carry {(sv['survivors_mean_price_return'] - sv['all_mean_price_return']) * 100:.0f} points more buy-and-hold drift than the point-in-time universe, and this strategy captures little of it." if sv else ""),
+           f"on the as-of-today universe the surviving symbols carry {(sv['survivors_mean_price_return'] - sv['all_mean_price_return']) * 100:.1f} points more buy-and-hold return than the point-in-time universe, and this strategy captures little of it." if sv else ""),
         "",
         "## Risk and exposure, claim vs corrected",
         "",
@@ -175,8 +175,13 @@ def _sev(delta: float) -> str:
 
 
 def _spike(se: dict) -> bool:
-    """The reported point is a spike when its one-step neighbours average less than half of it; otherwise it sits on a plateau."""
-    return se["neighbour_mean"] < 0.5 * se["reported_sharpe"]
+    """The reported point is a spike when its one-step neighbours average less than half of it; otherwise it sits on a plateau.
+
+    Only a positive reported Sharpe can be a spike, and the gap has to be material in absolute terms too: half of almost
+    nothing, or a negative best, says nothing about the surface.
+    """
+    r, m = se["reported_sharpe"], se["neighbour_mean"]
+    return r > 0 and m < 0.5 * r and r - m >= 0.3
 
 
 def _under_water(p: dict) -> str:

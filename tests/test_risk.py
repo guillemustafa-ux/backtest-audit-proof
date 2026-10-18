@@ -86,6 +86,19 @@ def test_corrected_run_draws_down_more_than_the_claim_on_the_synthetic_sample():
     assert r["corrected"]["drawdown_bars"] > r["claim"]["drawdown_bars"]
 
 
+def test_spike_needs_a_positive_reported_sharpe_and_a_real_gap():
+    assert report._spike({"reported_sharpe": 3.86, "neighbour_mean": 1.5})
+    assert not report._spike({"reported_sharpe": 3.86, "neighbour_mean": 3.43})  # a plateau
+    assert not report._spike({"reported_sharpe": 0.1, "neighbour_mean": 0.04})  # half of almost nothing is not a spike
+    assert not report._spike({"reported_sharpe": -0.5, "neighbour_mean": -0.6})
+    assert not report._spike({"reported_sharpe": 0.0, "neighbour_mean": -0.01})
+
+
+def test_under_water_marks_an_unrecovered_run():
+    assert report._under_water({"drawdown_bars": 116, "not_recovered": False}) == "116 bars"
+    assert report._under_water({"drawdown_bars": 2941, "not_recovered": True}) == "2941 bars (not recovered)"
+
+
 def test_report_renders_row_10_and_risk_section():
     r = report.run_audit(synthetic_prices(500, seed=11), GRID, n_controls=10)
     text = report.render(r, "test")
