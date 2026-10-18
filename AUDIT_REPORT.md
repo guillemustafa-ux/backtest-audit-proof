@@ -19,8 +19,22 @@ The submitted backtest reports 234 trades, a 93.6% win rate, a total return of 3
 | 7 | Best of 125 variants reported without multiple-testing control | 6 variants significant at 5% | 0 after Benjamini-Hochberg; expected best Sharpe from noise alone 2.39; deflated-Sharpe probability 0.00 | material |
 | 8 | Parameters optimized on the full sample, no holdout | in-sample Sharpe 0.54 (1800 bars) | holdout Sharpe 0.29 (1200 bars, touched once) | minor |
 | 9 | No random-entry control | strategy Sharpe -0.19 | 300 matched random-entry runs: mean -0.35, sd 0.28; strategy at the 68th percentile | material |
+| 10 | Only the best parameter point is reported; the surface around it is hidden | reported variant Sharpe 3.86 (rank 1 of 125) | its 4 one-step neighbours: mean 3.43 (min 3.17, max 3.77); grid median 1.65; 50.0% of neighbours within 0.3 Sharpe | material |
 
-Rows 1-3 are corrections to the backtest itself and compound: after all three the honest Sharpe is -0.62. Rows 4-9 are corrections to the evidence: they do not change the returns, they change how much the returns prove.
+Rows 1-3 are corrections to the backtest itself and compound: after all three the honest Sharpe is -0.62. Rows 4-10 are corrections to the evidence: they do not change the returns, they change how much the returns prove.
+
+## Risk and exposure, claim vs corrected
+
+| Metric | Claim (as submitted) | Corrected (rows 1-3 applied) |
+|---|---|---|
+| Max drawdown | 5.7% over 116 bars | 52.6% over 2941 bars |
+| Annualised volatility | 7.7% | 8.9% |
+| Exposure (share of bars in a position) | 12.1% | 20.4% |
+| Turnover (trades per year) | 19.7 | 19.3 |
+| Worst day | -3.1% | -3.8% |
+| Expected shortfall, worst 5% of days | -0.4% | -1.8% |
+
+The corrected column is the same strategy with look-ahead removed, ambiguous bars booked to the stop and 20 bps charged per round trip; it is what the risk figures would have been had the backtest been built correctly.
 
 ## Material weaknesses
 
@@ -31,6 +45,8 @@ Rows 1-3 are corrections to the backtest itself and compound: after all three th
 - Of 125 variants, 6 look significant at 5% (noise alone would produce about 6) and 0 survive FDR control; the best Sharpe of pure noise across that many trials would be about 2.39.
 - The in-sample Sharpe of 0.54 becomes 0.29 on a holdout that was never used for selection.
 - Random entries with the same trade count, holding periods and stop width reach the strategy's Sharpe in 32% of runs; the entry rule adds nothing measurable.
+- The reported parameters sit on a spike: their one-step neighbours average a Sharpe of 3.43 against the reported 3.86, so the result depends on one point of the grid.
+- The corrected run's maximum drawdown is 52.6% against 5.7% in the claim.
 
 ## Required corrections
 
@@ -43,6 +59,8 @@ Rows 1-3 are corrections to the backtest itself and compound: after all three th
 - Control the family-wise or false-discovery rate across every variant tried, and report the deflated Sharpe ratio with the number of trials.
 - Keep a confirmatory holdout that is touched exactly once, after the methodology is frozen.
 - Compare against a matched random-entry control: same number of trades, same holding-period distribution, same stop width, per instrument.
+- Report the parameter surface, not its maximum: the one-step neighbourhood and the grid distribution next to the chosen variant.
+- Report maximum drawdown, exposure and turnover with every performance figure; a Sharpe ratio without them hides how the return was earned.
 
 ## Recommended methodology for the next pre-registered run
 
@@ -52,6 +70,7 @@ Rows 1-3 are corrections to the backtest itself and compound: after all three th
 4. Select with Benjamini-Hochberg at q = 0.05 and report the deflated Sharpe ratio of the chosen variant against the full trial count.
 5. Run the matched random-entry control on the development sample; a variant that does not beat the 95th percentile of the control does not proceed.
 6. Run the surviving variant once on the holdout. Report it whatever the result; a second look at the holdout invalidates it.
+7. Report the parameter neighbourhood of the surviving variant and its risk profile (drawdown, exposure, turnover) with the holdout result.
 
 ## Evidence required before confirmatory testing
 

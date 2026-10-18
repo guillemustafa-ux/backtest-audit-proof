@@ -1,4 +1,4 @@
-"""Turn the nine audit steps into the written review a methodology audit is expected to deliver."""
+"""Turn the audit steps into the written review a methodology audit is expected to deliver."""
 
 from __future__ import annotations
 
@@ -36,13 +36,16 @@ def run_audit(prices: pd.DataFrame, grid: list[Params], n_controls: int = 300, c
         "multiple": steps.multiple_testing(prices, grid),
         "walk_forward": steps.walk_forward(prices, grid),
         "control": steps.random_control(prices, params, n_controls=n_controls),
+        "sensitivity": steps.parameter_sensitivity(prices, grid, params),
+        "risk": steps.risk_profile(prices, params, cost_bps),
     }
 
 
 def render(r: dict, source: str, synthetic: bool = True) -> str:
     p = r["params"]
-    nv, la, sb, co, wi, ba, ts, mt, wf, rc = (r[k] for k in ("naive", "lookahead", "same_bar", "costs", "windows", "baseline", "two_sided", "multiple", "walk_forward", "control"))
+    nv, la, sb, co, wi, ba, ts, mt, wf, rc, se, rk = (r[k] for k in ("naive", "lookahead", "same_bar", "costs", "windows", "baseline", "two_sided", "multiple", "walk_forward", "control", "sensitivity", "risk"))
     honest_sharpe = co["after"]["sharpe"]
+    cl, cr = rk["claim"], rk["corrected"]
     lines = [
         "# Backtest methodology audit",
         "",
@@ -69,9 +72,24 @@ def render(r: dict, source: str, synthetic: bool = True) -> str:
         f"| 7 | Best of {mt['variants']} variants reported without multiple-testing control | {mt['significant_raw']} variants significant at 5% | {mt['significant_after_fdr']} after Benjamini-Hochberg; expected best Sharpe from noise alone {_f(mt['expected_max_sharpe_noise'])}; deflated-Sharpe probability {_f(mt['deflated_sharpe_prob'])} | {'material' if mt['deflated_sharpe_prob'] < 0.95 else 'minor'} |",
         f"| 8 | Parameters optimized on the full sample, no holdout | in-sample Sharpe {_f(wf['sharpe_in_sample'])} ({wf['train_bars']} bars) | holdout Sharpe {_f(wf['sharpe_holdout'])} ({wf['holdout_bars']} bars, touched once) | {_sev(wf['sharpe_in_sample'] - wf['sharpe_holdout'])} |",
         f"| 9 | No random-entry control | strategy Sharpe {_f(rc['strategy_sharpe'])} | {rc['controls']} matched random-entry runs: mean {_f(rc['control_mean'])}, sd {_f(rc['control_sd'])}; strategy at the {rc['percentile']:.0f}th percentile | {'material' if rc['percentile'] < 95 else 'minor'} |",
+        f"| 10 | Only the best parameter point is reported; the surface around it is hidden | reported variant Sharpe {_f(se['reported_sharpe'])} (rank {se['rank']} of {len(se['surface'])}) | its {se['neighbours']} one-step neighbours: mean {_f(se['neighbour_mean'])} (min {_f(se['neighbour_min'])}, max {_f(se['neighbour_max'])}); grid median {_f(se['grid_median'])}; {_pct(se['share_within_0_3'])} of neighbours within 0.3 Sharpe | {_sev(se['reported_sharpe'] - se['neighbour_mean'])} |",
         "",
         "Rows 1-3 are corrections to the backtest itself and compound: after all three the honest Sharpe is "
-        f"{_f(honest_sharpe)}. Rows 4-9 are corrections to the evidence: they do not change the returns, they change how much the returns prove.",
+        f"{_f(honest_sharpe)}. Rows 4-10 are corrections to the evidence: they do not change the returns, they change how much the returns prove.",
+        "",
+        "## Risk and exposure, claim vs corrected",
+        "",
+        "| Metric | Claim (as submitted) | Corrected (rows 1-3 applied) |",
+        "|---|---|---|",
+        f"| Max drawdown | {_pct(cl['max_drawdown'])} over {cl['drawdown_bars']} bars | {_pct(cr['max_drawdown'])} over {cr['drawdown_bars']} bars |",
+        f"| Annualised volatility | {_pct(cl['ann_vol'])} | {_pct(cr['ann_vol'])} |",
+        f"| Exposure (share of bars in a position) | {_pct(cl['exposure'])} | {_pct(cr['exposure'])} |",
+        f"| Turnover (trades per year) | {_f(cl['trades_per_year'], 1)} | {_f(cr['trades_per_year'], 1)} |",
+        f"| Worst day | {_pct(cl['worst_day'])} | {_pct(cr['worst_day'])} |",
+        f"| Expected shortfall, worst 5% of days | {_pct(cl['es_5'])} | {_pct(cr['es_5'])} |",
+        "",
+        f"The corrected column is the same strategy with look-ahead removed, ambiguous bars booked to the stop and {co['cost_bps']:.0f} bps charged per round trip; "
+        "it is what the risk figures would have been had the backtest been built correctly.",
         "",
         "## Material weaknesses",
         "",
@@ -90,6 +108,8 @@ def render(r: dict, source: str, synthetic: bool = True) -> str:
         "- Control the family-wise or false-discovery rate across every variant tried, and report the deflated Sharpe ratio with the number of trials.",
         "- Keep a confirmatory holdout that is touched exactly once, after the methodology is frozen.",
         "- Compare against a matched random-entry control: same number of trades, same holding-period distribution, same stop width, per instrument.",
+        "- Report the parameter surface, not its maximum: the one-step neighbourhood and the grid distribution next to the chosen variant.",
+        "- Report maximum drawdown, exposure and turnover with every performance figure; a Sharpe ratio without them hides how the return was earned.",
         "",
         "## Recommended methodology for the next pre-registered run",
         "",
@@ -99,6 +119,7 @@ def render(r: dict, source: str, synthetic: bool = True) -> str:
         "4. Select with Benjamini-Hochberg at q = 0.05 and report the deflated Sharpe ratio of the chosen variant against the full trial count.",
         "5. Run the matched random-entry control on the development sample; a variant that does not beat the 95th percentile of the control does not proceed.",
         "6. Run the surviving variant once on the holdout. Report it whatever the result; a second look at the holdout invalidates it.",
+        "7. Report the parameter neighbourhood of the surviving variant and its risk profile (drawdown, exposure, turnover) with the holdout result.",
         "",
         "## Evidence required before confirmatory testing",
         "",
@@ -138,7 +159,7 @@ def _sev_t(t_before: float, t_after: float) -> str:
 
 
 def _weaknesses(r: dict) -> list[str]:
-    la, sb, co, wi, mt, wf, rc = (r[k] for k in ("lookahead", "same_bar", "costs", "windows", "multiple", "walk_forward", "control"))
+    la, sb, co, wi, mt, wf, rc, se, rk = (r[k] for k in ("lookahead", "same_bar", "costs", "windows", "multiple", "walk_forward", "control", "sensitivity", "risk"))
     out = []
     d = la["before"]["sharpe"] - la["after"]["sharpe"]
     if d >= 0.3:
@@ -156,4 +177,9 @@ def _weaknesses(r: dict) -> list[str]:
         out.append(f"The in-sample Sharpe of {_f(wf['sharpe_in_sample'])} becomes {_f(wf['sharpe_holdout'])} on a holdout that was never used for selection.")
     if rc["percentile"] < 95:
         out.append(f"Random entries with the same trade count, holding periods and stop width reach the strategy's Sharpe in {100 - rc['percentile']:.0f}% of runs; the entry rule adds nothing measurable.")
-    return out or ["No material weakness found by the nine checks."]
+    d = se["reported_sharpe"] - se["neighbour_mean"]
+    if d >= 0.3:
+        out.append(f"The reported parameters sit on a spike: their one-step neighbours average a Sharpe of {_f(se['neighbour_mean'])} against the reported {_f(se['reported_sharpe'])}, so the result depends on one point of the grid.")
+    if rk["corrected"]["max_drawdown"] > rk["claim"]["max_drawdown"]:
+        out.append(f"The corrected run's maximum drawdown is {_pct(rk['corrected']['max_drawdown'])} against {_pct(rk['claim']['max_drawdown'])} in the claim.")
+    return out or ["No material weakness found by the ten checks."]

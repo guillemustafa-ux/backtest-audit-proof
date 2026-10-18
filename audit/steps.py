@@ -1,13 +1,15 @@
-"""The nine audit steps. Each takes the naive setup, removes one artifact, and returns the numbers for the report."""
+"""The audit steps. Each takes the naive setup, removes or exposes one artifact, and returns the numbers for the report."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 from audit import stats as st
-from audit.engine import Params, Rules, Trade, _walk, atr, breakout_signals, daily_returns, run, sharpe, summary
+from audit.engine import TRADING_DAYS, Params, Rules, Trade, _walk, atr, breakout_signals, daily_returns, run, sharpe, summary
 
 NAIVE = Rules(lookahead=True, same_bar_best_case=True, cost_bps=0.0)
 HONEST = Rules(lookahead=False, same_bar_best_case=False, cost_bps=0.0)
@@ -182,4 +184,69 @@ def random_control(prices: pd.DataFrame, params: Params, n_controls: int = 300, 
         "percentile": float((control_sharpes < s_strat).mean() * 100.0),
         "matched_trades": n_trades, "control_trades_mean": float(np.mean(control_trades)),
         "median_hold": float(np.median(holds)) if len(holds) else 0.0,
+    }
+
+
+# --- 10. parameter sensitivity -----------------------------------------------------------------
+
+def _key(p: Params) -> tuple:
+    return (p.lookback, p.target_atr, p.stop_atr)
+
+
+def _neighbours(params: Params, grid: list[Params]) -> list[Params]:
+    """Variants that differ from `params` in exactly one parameter, by exactly one step of its sorted axis."""
+    out = []
+    for name in ("lookback", "target_atr", "stop_atr"):
+        axis = sorted({getattr(p, name) for p in grid})
+        at = axis.index(getattr(params, name))
+        out += [replace(params, **{name: axis[i]}) for i in (at - 1, at + 1) if 0 <= i < len(axis)]
+    return out
+
+
+def parameter_sensitivity(prices: pd.DataFrame, grid: list[Params], params: Params, rules: Rules = NAIVE) -> dict:
+    """The reported number is the peak of a search; the one-step neighbours say how typical that peak is.
+
+    Run under the NAIVE rules the surface is the one the claim was selected on, so the row audits the
+    claim itself. An interior point of the 5x5x5 grid has 6 neighbours, a corner has 3.
+    """
+    surface = {_key(p): sharpe(daily_returns(prices, run(prices, p, rules), rules.cost_bps)) for p in grid}
+    reported = surface[_key(params)]
+    near = np.array([surface[_key(p)] for p in _neighbours(params, grid) if _key(p) in surface])
+    values = np.array(list(surface.values()))
+    return {
+        "rules": "naive" if rules == NAIVE else "honest", "reported_sharpe": float(reported),
+        "neighbour_sharpes": [float(s) for s in near],
+        "neighbour_mean": float(near.mean()), "neighbour_min": float(near.min()), "neighbour_max": float(near.max()),
+        "neighbours": int(len(near)), "grid_median": float(np.median(values)), "grid_mean": float(values.mean()),
+        "share_within_0_3": float((np.abs(near - reported) <= 0.3).mean()),
+        "surface": surface, "rank": int((values > reported).sum()) + 1,
+    }
+
+
+# --- risk and exposure profile -----------------------------------------------------------------
+
+def _risk(prices: pd.DataFrame, trades: list[Trade], daily: pd.Series) -> dict:
+    dd, bars = st.max_drawdown(daily)
+    return {
+        "max_drawdown": dd, "drawdown_bars": bars,
+        "ann_vol": float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)),
+        "exposure": sum(t.exit_idx - t.entry_idx + 1 for t in trades) / len(prices),
+        "trades_per_year": len(trades) / (len(prices) / TRADING_DAYS),
+        "worst_day": float(daily.min()), "es_5": st.expected_shortfall(daily, 0.05), "trades": len(trades),
+    }
+
+
+def risk_profile(prices: pd.DataFrame, params: Params, cost_bps: float = 20.0) -> dict:
+    """Drawdown, volatility, exposure, turnover and tail of the claim (naive rules, no cost) and of the
+    corrected run (rows 1-3 applied: no look-ahead, ambiguous bars to the stop, `cost_bps` per round trip).
+
+    Volatility is the std(ddof=1) of the mark-to-market daily series over every bar, flat days as zeros,
+    annualised with sqrt(252): the convention of `engine.sharpe`. Exposure counts the bars from the entry
+    bar to the exit bar inclusive, which are the bars `daily_returns` books P&L on.
+    """
+    claim = run(prices, params, NAIVE)
+    corrected = run(prices, params, Rules(lookahead=False, same_bar_best_case=False, cost_bps=cost_bps))
+    return {
+        "claim": _risk(prices, claim, daily_returns(prices, claim)),
+        "corrected": _risk(prices, corrected, daily_returns(prices, corrected, cost_bps)),
     }

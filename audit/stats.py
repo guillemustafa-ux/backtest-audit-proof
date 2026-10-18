@@ -1,8 +1,9 @@
-"""Statistics the audit needs: dependent-observation corrections, FDR, and the deflated Sharpe ratio."""
+"""Statistics the audit needs: dependent-observation corrections, FDR, the deflated Sharpe ratio, and the risk tail."""
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 EULER_GAMMA = 0.5772156649015329
@@ -97,3 +98,30 @@ def deflated_sharpe(sharpe_per_period: float, n_periods: int, skew: float, kurt:
     denom = np.sqrt(max(1.0 - skew * sharpe_per_period + (kurt - 1.0) / 4.0 * sharpe_per_period**2, 1e-12))
     z = (sharpe_per_period - sr0) * np.sqrt(n_periods - 1) / denom
     return float(stats.norm.cdf(z))
+
+
+def max_drawdown(daily: np.ndarray | pd.Series) -> tuple[float, int]:
+    """Deepest peak-to-trough fall of the compounded equity curve, as a positive fraction, and the
+    longest run of bars spent below the running peak. Equity starts at 1.0 before the first bar.
+    """
+    x = np.asarray(daily, dtype=float)
+    if len(x) == 0:
+        return 0.0, 0
+    equity = np.concatenate([[1.0], np.cumprod(1.0 + x)])
+    drawdown = 1.0 - equity / np.maximum.accumulate(equity)
+    longest = run = 0
+    for below in drawdown > 0:
+        run = run + 1 if below else 0
+        longest = max(longest, run)
+    return float(drawdown.max()), int(longest)
+
+
+def expected_shortfall(daily: np.ndarray | pd.Series, alpha: float = 0.05) -> float:
+    """Historical expected shortfall: the mean of the worst `alpha` share of the strategy's own daily
+    returns (the first ceil(alpha * n) values in ascending order). No distribution is fitted; the tail
+    is whatever the series shows, flat days included as zeros. Returns 0.0 for an empty series.
+    """
+    x = np.sort(np.asarray(daily, dtype=float))
+    if len(x) == 0:
+        return 0.0
+    return float(x[: int(np.ceil(alpha * len(x)))].mean())
