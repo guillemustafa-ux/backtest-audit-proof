@@ -12,6 +12,7 @@ from audit import stats as st
 from audit.engine import TRADING_DAYS, Params, Rules, Trade, _walk, atr, breakout_signals, daily_returns, run, sharpe, summary
 
 NAIVE = Rules(lookahead=True, same_bar_best_case=True, cost_bps=0.0)
+NO_LOOKAHEAD = Rules(lookahead=False, same_bar_best_case=True, cost_bps=0.0)  # row 1 alone: the dashed curve of the equity chart
 HONEST = Rules(lookahead=False, same_bar_best_case=False, cost_bps=0.0)
 
 
@@ -28,8 +29,7 @@ def full_grid() -> list[Params]:
 
 def lookahead(prices: pd.DataFrame, params: Params) -> dict:
     before = summary(prices, run(prices, params, NAIVE))
-    after_rules = Rules(lookahead=False, same_bar_best_case=True, cost_bps=0.0)
-    after = summary(prices, run(prices, params, after_rules))
+    after = summary(prices, run(prices, params, NO_LOOKAHEAD))
     return {"before": before, "after": after}
 
 
@@ -303,14 +303,16 @@ def risk_profile(prices: pd.DataFrame, params: Params, cost_bps: float = 20.0) -
 
     Volatility is the std(ddof=1) of the mark-to-market daily series over every bar, flat days as zeros,
     annualised with sqrt(252): the convention of `engine.sharpe`. Exposure counts the bars from the entry
-    bar to the exit bar inclusive, which are the bars `daily_returns` books P&L on. `series` carries both
-    daily series as plain arrays for the charts.
+    bar to the exit bar inclusive, which are the bars `daily_returns` books P&L on. `series` carries the daily
+    series of the claim, of the claim with only the look-ahead removed (row 1 alone, no cost) and of the
+    corrected run, as plain arrays for the charts.
     """
     claim = run(prices, params, NAIVE)
+    no_lookahead = run(prices, params, NO_LOOKAHEAD)
     corrected = run(prices, params, Rules(lookahead=False, same_bar_best_case=False, cost_bps=cost_bps))
-    d_claim, d_corrected = daily_returns(prices, claim), daily_returns(prices, corrected, cost_bps)
+    d_claim, d_no_lookahead, d_corrected = daily_returns(prices, claim), daily_returns(prices, no_lookahead), daily_returns(prices, corrected, cost_bps)
     return {
         "claim": _risk(prices, claim, d_claim),
         "corrected": _risk(prices, corrected, d_corrected),
-        "series": {"claim": d_claim.to_numpy(), "corrected": d_corrected.to_numpy()},
+        "series": {"claim": d_claim.to_numpy(), "no_lookahead": d_no_lookahead.to_numpy(), "corrected": d_corrected.to_numpy()},
     }
