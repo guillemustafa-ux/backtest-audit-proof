@@ -242,11 +242,14 @@ def risk_profile(prices: pd.DataFrame, params: Params, cost_bps: float = 20.0) -
 
     Volatility is the std(ddof=1) of the mark-to-market daily series over every bar, flat days as zeros,
     annualised with sqrt(252): the convention of `engine.sharpe`. Exposure counts the bars from the entry
-    bar to the exit bar inclusive, which are the bars `daily_returns` books P&L on.
+    bar to the exit bar inclusive, which are the bars `daily_returns` books P&L on. `series` carries both
+    daily series as plain arrays for the charts.
     """
     claim = run(prices, params, NAIVE)
     corrected = run(prices, params, Rules(lookahead=False, same_bar_best_case=False, cost_bps=cost_bps))
+    d_claim, d_corrected = daily_returns(prices, claim), daily_returns(prices, corrected, cost_bps)
     return {
-        "claim": _risk(prices, claim, daily_returns(prices, claim)),
-        "corrected": _risk(prices, corrected, daily_returns(prices, corrected, cost_bps)),
+        "claim": _risk(prices, claim, d_claim),
+        "corrected": _risk(prices, corrected, d_corrected),
+        "series": {"claim": d_claim.to_numpy(), "corrected": d_corrected.to_numpy()},
     }

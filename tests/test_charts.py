@@ -1,0 +1,88 @@
+"""The report charts are hand-written SVG: they must parse, be byte-deterministic and carry the series they claim."""
+
+import xml.etree.ElementTree as ET
+
+import numpy as np
+
+from audit import charts, report, steps
+from audit.data import synthetic_prices
+from audit.engine import Params
+from naive_backtest import GRID
+
+SVG = "{http://www.w3.org/2000/svg}"
+CLAIM = np.array([0.01, -0.02, 0.03, 0.0, 0.015] * 10)  # 50 bars, ends above 1.0
+CORRECTED = np.array([-0.01, 0.0, -0.005, 0.002, -0.02] * 10)  # 50 bars, ends below 1.0
+LOOKBACKS, TARGETS = (5, 10, 20, 40, 60), (0.75, 1.0, 1.5, 2.0, 3.0)
+SURFACE = {(lb, t, 1.0): round(0.1 * i - 1.0, 2) for i, (lb, t) in enumerate((lb, t) for lb in LOOKBACKS for t in TARGETS)}
+CHOSEN = (20, 1.5, 1.0)
+
+
+def _root(svg: str) -> ET.Element:
+    assert svg.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg")
+    return root
+
+
+def _points(polyline: ET.Element) -> list[tuple[float, float]]:
+    return [tuple(float(v) for v in pair.split(",")) for pair in polyline.get("points").split()]
+
+
+def test_equity_svg_has_two_polylines_per_panel_and_the_final_equity_in_the_legend():
+    svg = charts.equity_drawdown_svg(CLAIM, CORRECTED, "test")
+    root = _root(svg)
+    assert len(list(root.iter(f"{SVG}polyline"))) == 4
+    assert f"Claim {np.prod(1.0 + CLAIM):.2f}" in svg and f"Corrected {np.prod(1.0 + CORRECTED):.2f}" in svg
+
+
+def test_sensitivity_svg_prints_every_cell_and_marks_the_chosen_one():
+    svg = charts.sensitivity_svg(SURFACE, CHOSEN, "test")
+    root = _root(svg)
+    rects = list(root.iter(f"{SVG}rect"))
+    cells = [r for r in rects if r.get("class") == "cell"]
+    assert len(cells) == 25 and all(r.get("fill", "").startswith("#") for r in cells)
+    assert len([r for r in rects if r.get("class") == "chosen"]) == 1
+    values = sorted(t.text for t in root.iter(f"{SVG}text") if t.get("class") == "value")
+    assert values == sorted(f"{v:.2f}" for v in SURFACE.values())
+    assert "stop = 1.0 ATR, naive rules" in svg and "lookback (bars)" in svg and "target (ATR)" in svg
+
+
+def test_charts_are_deterministic_finite_and_inside_the_viewbox():
+    for make in (lambda: charts.equity_drawdown_svg(CLAIM, CORRECTED, "t"), lambda: charts.sensitivity_svg(SURFACE, CHOSEN, "t")):
+        a, b = make(), make()
+        assert a == b and "nan" not in a and "inf" not in a
+        root = _root(a)
+        _, _, width, height = (float(v) for v in root.get("viewBox").split())
+        for poly in root.iter(f"{SVG}polyline"):
+            assert all(0.0 <= x <= width and 0.0 <= y <= height for x, y in _points(poly))
+
+
+def test_equity_svg_downsamples_long_series():
+    rng = np.random.default_rng(0)
+    long_a, long_b = rng.normal(0.0, 0.01, 3000), rng.normal(0.0, 0.01, 3000)
+    root = _root(charts.equity_drawdown_svg(long_a, long_b, "t"))
+    for poly in root.iter(f"{SVG}polyline"):
+        assert poly.get("points").count(",") <= 602
+
+
+def test_risk_profile_exposes_the_daily_series():
+    prices = synthetic_prices(400, seed=11)
+    r = steps.risk_profile(prices, Params(lookback=5, target_atr=1.0, stop_atr=0.5))
+    for side in ("claim", "corrected"):
+        assert isinstance(r["series"][side], np.ndarray) and len(r["series"][side]) == len(prices)
+
+
+def test_write_charts_returns_relative_posix_paths(tmp_path):
+    result = {"params": Params(*CHOSEN), "risk": {"series": {"claim": CLAIM, "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE}}
+    paths = charts.write_charts(result, str(tmp_path / "AUDIT_REPORT.md"))
+    assert paths == {"equity": "charts/AUDIT_REPORT_equity.svg", "sensitivity": "charts/AUDIT_REPORT_sensitivity.svg"}
+    for rel in paths.values():
+        _root((tmp_path / rel).read_text(encoding="utf-8"))
+
+
+def test_report_embeds_the_charts_only_when_given():
+    r = report.run_audit(synthetic_prices(500, seed=11), GRID, n_controls=10)
+    with_charts = report.render(r, "test", charts={"equity": "charts/x_equity.svg", "sensitivity": "charts/x_sensitivity.svg"})
+    assert "## Charts" in with_charts and "](charts/x_equity.svg)" in with_charts and "](charts/x_sensitivity.svg)" in with_charts
+    assert with_charts.index("## Risk and exposure") < with_charts.index("## Charts") < with_charts.index("## Material weaknesses")
+    assert "## Charts" not in report.render(r, "test")
