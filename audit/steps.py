@@ -229,6 +229,50 @@ def parameter_sensitivity(prices: pd.DataFrame, grid: list[Params], params: Para
     }
 
 
+# --- 11. survivorship bias ---------------------------------------------------------------------
+
+def _delisting_bar(prices: pd.DataFrame, floor: float) -> int | None:
+    """Index of the first close below `floor` times the first close, or None when the symbol never gets there."""
+    close = prices["close"].to_numpy()
+    below = np.nonzero(close < floor * close[0])[0]
+    return int(below[0]) if len(below) else None
+
+
+def _equal_weight(series: list[pd.Series], bars: int) -> pd.Series:
+    """Per bar, the mean daily return of the symbols that still exist; a delisted symbol leaves the denominator too."""
+    table = np.full((len(series), bars), np.nan)
+    for row, s in zip(table, series):
+        row[: len(s)] = s.to_numpy()
+    alive = ~np.isnan(table)
+    return pd.Series(np.where(alive, table, 0.0).sum(axis=0) / np.maximum(alive.sum(axis=0), 1))
+
+
+def survivorship(universe: list[pd.DataFrame], params: Params, floor: float = 0.5, rules: Rules = HONEST) -> dict:
+    """A universe built as of today holds only the symbols that never failed; the point-in-time universe holds
+    every symbol until its delisting bar, with the open position closed at that bar's close.
+
+    A symbol is delisted on the first bar whose close is below `floor` times its first close; from that bar on
+    its data does not exist. Each symbol runs the strategy on its own history (the whole sample for a survivor,
+    the truncated one otherwise; the engine's time exit at the last bar closes whatever is open) and each
+    universe is the equal-weight mean of the daily mark-to-market returns of the symbols alive on that bar.
+    """
+    bars = max(len(p) for p in universe)
+    delisted_at = [_delisting_bar(p, floor) for p in universe]
+    histories = [p if bar is None else p.iloc[: bar + 1] for p, bar in zip(universe, delisted_at)]
+    trades = [run(h, params, rules) for h in histories]
+    daily = [daily_returns(h, t, rules.cost_bps) for h, t in zip(histories, trades)]
+    total = [float(h["close"].iloc[-1] / h["close"].iloc[0] - 1.0) for h in histories]
+    survivors = [i for i, bar in enumerate(delisted_at) if bar is None]
+    if not survivors:
+        raise ValueError("every symbol was delisted: nothing is left to build the as-of-today universe from")
+    return {
+        "n_symbols": len(universe), "delisted": len(universe) - len(survivors), "survivors": len(survivors), "floor": floor,
+        "survivors_sharpe": sharpe(_equal_weight([daily[i] for i in survivors], bars)), "point_in_time_sharpe": sharpe(_equal_weight(daily, bars)),
+        "survivors_mean_total_return": float(np.mean([total[i] for i in survivors])), "all_mean_total_return": float(np.mean(total)),
+        "survivors_trades": sum(len(trades[i]) for i in survivors), "point_in_time_trades": sum(len(t) for t in trades),
+    }
+
+
 # --- risk and exposure profile -----------------------------------------------------------------
 
 def _risk(prices: pd.DataFrame, trades: list[Trade], daily: pd.Series) -> dict:

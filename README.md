@@ -9,12 +9,12 @@ The point is not the strategy. The point is that every number in a backtest repo
 ```bash
 python -m venv .venv && .venv/Scripts/pip install -e ".[test]"   # Windows; on macOS/Linux use .venv/bin/pip
 python naive_backtest.py          # the claim: Sharpe 3.86, win rate 93.6%, p = 5.8e-51
-python -m audit                   # the audit: writes AUDIT_REPORT.md in about a second
-python -m pytest                  # 17 tests, each asserting an artifact moves its metric the predicted way
+python -m audit                   # the audit: writes AUDIT_REPORT.md and charts/ in about five seconds
+python -m pytest                  # 43 tests, each asserting an artifact moves its metric the predicted way
 python -m audit --csv data/btc_daily.csv --out APPENDIX_BTC.md   # same audit on real BTC daily data, offline
 ```
 
-Same seed, same numbers: `AUDIT_REPORT.md` regenerates byte-identical.
+Same seed, same numbers: `AUDIT_REPORT.md` and the charts regenerate byte-identical.
 
 ## What the audit checks
 
@@ -29,17 +29,28 @@ Same seed, same numbers: `AUDIT_REPORT.md` regenerates byte-identical.
 | 7 | Best of 125 parameter variants reported as *the* result | Benjamini-Hochberg FDR, deflated Sharpe ratio | 6 "significant" → 0; noise alone expects a best Sharpe of 2.39 |
 | 8 | Parameters optimized on the whole sample | Walk-forward with a holdout touched once | 0.54 in-sample → 0.29 holdout |
 | 9 | No control | Matched random-entry control: same trade count, holding periods and stop width | strategy at the 68th percentile of 300 random runs |
+| 10 | Only the best parameter point is reported; the surface around it is hidden | Report the one-step neighbourhood and the grid distribution next to the chosen variant | reported 3.86 vs its 4 neighbours averaging 3.43 (min 3.17, max 3.77); grid median 1.65 |
+| 11 | Universe built as of today: the symbols that failed are missing from the history (survivorship) | Point-in-time universe: every symbol until its delisting, positions closed at the delisting close | 17 of 40 synthetic symbols fell below 50% of their start; survivors only: Sharpe −0.38, mean total return 54.3%; point-in-time: −0.82 and 9.8% |
 
-Rows 1–3 fix the backtest and compound. Rows 4–9 fix the evidence: they change how much the returns prove, not the returns.
+Rows 1–3 fix the backtest and compound. Rows 4–11 fix the evidence: they change how much the returns prove, not the returns.
 
 The report ends with the four sections a methodology review is asked for: material weaknesses, required corrections, recommended methodology for the next pre-registered run, and the evidence required before confirmatory testing.
 
+## Risk profile and charts
+
+The report also carries a risk and exposure table for the claim and for the corrected run (rows 1–3 applied): maximum drawdown and its length, annualised volatility, exposure (share of bars in a position), turnover (trades per year), worst day and the 5% expected shortfall. On the synthetic data the claim's maximum drawdown is 5.7% over 116 bars; corrected, 52.6% over 2941 bars. Two charts are written next to the report as plain SVG, with no plotting dependency so they regenerate byte-identical: equity and drawdown of claim vs corrected, the equity on a log axis so both curves stay visible, and the naive Sharpe across the parameter grid at the chosen stop with the reported cell framed.
+
+![Equity and drawdown, claim vs corrected](charts/AUDIT_REPORT_equity.svg)
+
+![Naive Sharpe across the parameter grid at the chosen stop](charts/AUDIT_REPORT_sensitivity.svg)
+
 ## Layout
 
-- `audit/data.py` — driftless random walk with fat-tailed intrabar wicks (Student t, 3 df) and a CSV loader.
+- `audit/data.py` — driftless random walk with fat-tailed intrabar wicks (Student t, 3 df), a universe of them for the survivorship row, and a CSV loader.
 - `audit/engine.py` — long-only breakout engine; every artifact is a switch in `Rules`.
-- `audit/steps.py` — the nine audit steps, one function each.
-- `audit/stats.py` — Newey-West, moving-block bootstrap, effective sample size, Benjamini-Hochberg, expected maximum Sharpe and deflated Sharpe ratio (Bailey & López de Prado, 2014).
+- `audit/steps.py` — the eleven audit steps and the risk profile, one function each.
+- `audit/stats.py` — Newey-West, moving-block bootstrap, effective sample size, Benjamini-Hochberg, expected maximum Sharpe and deflated Sharpe ratio (Bailey & López de Prado, 2014), maximum drawdown and expected shortfall.
+- `audit/charts.py` — the two charts as hand-written SVG.
 - `audit/report.py` — renders the review; `python -m audit` runs everything.
 - `naive_backtest.py` — the claim, with its 125-variant grid.
 - `data/btc_daily.csv` — BTC/USDT daily candles from Binance's public API, committed with `data/FETCHED.txt` so the appendix runs offline; `data/fetch_btc.py` refreshes it.
@@ -49,6 +60,8 @@ Dependencies: pandas, numpy, scipy. No backtesting framework, on purpose: in an 
 ## Limits, stated plainly
 
 - Daily bars. Same-bar ambiguity (row 2) can only be resolved with intrabar data; here it is resolved conservatively, which is the right default and still an assumption.
-- Long only, one position at a time, one instrument. The random control is matched per instrument as it should be; a multi-instrument study needs the control per instrument too.
+- Long only, one position at a time, one instrument per run; the survivorship row averages 40 synthetic instruments equal-weight. The random control is matched per instrument as it should be; a multi-instrument study needs the control per instrument too.
+- The survivorship row uses a synthetic universe of 40 random walks with a 50% delisting floor; it demonstrates the mechanism, not any real index.
+- No regime breakdown: the audit does not split the sample by volatility or trend regime.
 - The BTC appendix is on real data, where the truth is unknown. The audit there says how much of the claim survives each correction and how much the baseline drift explains — not that the edge is zero.
 - This audits a backtest's methodology. It does not model options, intraday quotes, or execution latency.

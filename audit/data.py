@@ -1,4 +1,4 @@
-"""Price data: a synthetic random walk with a known truth (no edge), and a CSV loader for the appendix."""
+"""Price data: a synthetic random walk with a known truth (no edge), a universe of them, and a CSV loader for the appendix."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pandas as pd
 COLUMNS = ["open", "high", "low", "close"]
 
 
-def synthetic_prices(n_bars: int = 3000, seed: int = 7, daily_vol: float = 0.012, start: float = 100.0) -> pd.DataFrame:
+def synthetic_prices(n_bars: int = 3000, seed: int | np.random.SeedSequence = 7, daily_vol: float = 0.012, start: float = 100.0) -> pd.DataFrame:
     """Daily OHLC bars from a driftless log random walk.
 
     Close-to-close returns are i.i.d. normal with zero mean, so no rule based on past prices has
@@ -29,6 +29,15 @@ def synthetic_prices(n_bars: int = 3000, seed: int = 7, daily_vol: float = 0.012
     low = body_lo - wick[1]
     index = pd.bdate_range("2014-01-01", periods=n_bars)
     return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close}, index=index)
+
+
+def synthetic_universe(n_symbols: int, bars: int, seed: int) -> list[pd.DataFrame]:
+    """`n_symbols` independent driftless walks of `bars` bars each, the same kind of data as `synthetic_prices`.
+
+    Every symbol draws from a child of `SeedSequence(seed)`, so the streams are independent of one another
+    and of the single-instrument series that `synthetic_prices(seed=seed)` draws from the root sequence.
+    """
+    return [synthetic_prices(bars, child) for child in np.random.SeedSequence(seed).spawn(n_symbols)]
 
 
 def load_csv(path: str) -> pd.DataFrame:
