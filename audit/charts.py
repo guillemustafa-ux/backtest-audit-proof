@@ -24,6 +24,7 @@ INK, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#898781", "#e1e0d9", "#c3c2b7", "#
 HALO = f' stroke="{SURFACE}" stroke-width="3" paint-order="stroke"'   # text over curves or the band stays legible
 MAX_POINTS = 600                             # at most this many buckets per curve; each draws its first bar and its extremes
 EQ_TOP, EQ_BOT, DD_TOP, DD_BOT, EQ_HEIGHT = 66, 306, 330, 470, 514   # two subtitle lines between the title and the first panel
+LEGEND_CHAR_PX = 6.6                         # a generous average advance of 12 px sans-serif: SVG text has no metrics here
 
 
 def _ticks(lo: float, hi: float, target: int) -> tuple[list[float], float]:
@@ -169,6 +170,7 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
         (EQ_TOP, EQ_BOT, eq_ticks, [_label(v, v) for v in eq_ticks], _log_scale(min(eq_lo, eq_ticks[0]), max(eq_hi, eq_ticks[-1]), EQ_BOT, EQ_TOP), equity, "equity (start 1.0, log scale)"),
         (DD_TOP, DD_BOT, dd_ticks, [_label(v, dd_step, 100.0, "%") for v in dd_ticks], _scale(dd_ticks[0], dd_ticks[-1], DD_BOT, DD_TOP), drawdown, "drawdown from peak"),
     )
+    legend = [f"{name}, final {e[-1]:.2f}x" for name, e in zip(names, equity)] + ([band_name] if edges is not None else [])
     body = [f'<text x="{WIDTH / 2:.1f}" y="{38 + 14 * i}" text-anchor="middle" fill="{MUTED}">{escape(line)}</text>' for i, line in enumerate(subtitles)]
     for top, bot, ticks, labels, sy, data, name in panels:
         body.append(f'<rect x="{LEFT}" y="{top}" width="{WIDTH - LEFT - RIGHT}" height="{bot - top}" fill="none" stroke="{AXIS}"/>')
@@ -184,6 +186,11 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
             body.append(f'<text x="{LEFT - 6}" y="{y + 4:.1f}" text-anchor="end" fill="{MUTED}">{label}</text>')
         for v, _ in x_marks:
             body.append(f'<line x1="{sx(v):.1f}" y1="{top}" x2="{sx(v):.1f}" y2="{bot}" stroke="{GRID}"/>')
+        if top == EQ_TOP:
+            # an opaque backing under the legend hides the gridlines and the band behind it, which the text halo
+            # only clears around each glyph's strokes; the curves are drawn after it, so no data goes under it
+            width = 28 + LEGEND_CHAR_PX * max(len(t) for t in legend) + 6
+            body.append(f'<rect class="legend-box" x="{LEFT + 4}" y="{EQ_TOP + 4}" width="{width:.0f}" height="{16 * len(legend)}" fill="{SURFACE}"/>')
         mid = (top + bot) / 2
         body.append(f'<text transform="rotate(-90 14 {mid:.1f})" x="14" y="{mid:.1f}" text-anchor="middle" fill="{MUTED}">{name}</text>')
         for (cls, colour, dash), values in zip(styles, data):
@@ -194,11 +201,11 @@ def equity_drawdown_svg(curves: list[tuple[str, np.ndarray | pd.Series]], title:
     if x_title:
         body.append(f'<text x="{(LEFT + WIDTH - RIGHT) / 2:.1f}" y="{DD_BOT + 34}" text-anchor="middle" fill="{MUTED}">{x_title}</text>')
     eq_sy = panels[0][4]
-    for i, (name, (cls, colour, dash), e) in enumerate(zip(names, styles, equity)):
+    for i, ((cls, colour, dash), e, text) in enumerate(zip(styles, equity, legend)):
         y = EQ_TOP + 16 + 16 * i
         dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         body.append(f'<line x1="{LEFT + 10}" y1="{y - 4}" x2="{LEFT + 26}" y2="{y - 4}" stroke="{colour}" stroke-width="1.5"{dash_attr}/>')
-        body.append(f'<text class="legend" x="{LEFT + 32}" y="{y}" font-size="12"{HALO}>{escape(name)}, final {e[-1]:.2f}x</text>')
+        body.append(f'<text class="legend" x="{LEFT + 32}" y="{y}" font-size="12"{HALO}>{escape(text)}</text>')
         # direct label at the curve's end, in text ink with a surface halo so it stays legible over the other curves;
         # a curve that ends on the frame top gets its label just above the frame instead of over its own last pixels
         label_y = eq_sy(e[-1]) - 4
@@ -264,7 +271,7 @@ def write_charts(result: dict, out_path: str, dates: pd.DatetimeIndex | None = N
             f"Equity and drawdown: {p.lookback}-bar breakout, target {p.target_atr} ATR, stop {p.stop_atr} ATR",
             (
                 "claim as submitted; dashed: only the look-ahead removed (ambiguous bars still booked to the target, no cost)",
-                f"corrected: look-ahead removed, ambiguous bars booked to the stop, {cost_bps:.0f} bps per round trip",
+                f"corrected: look-ahead removed, ambiguous bars booked to the stop, {cost_bps:g} bps per round trip",
             ),
             band=control["band_series"],
             band_name=f"{control['controls']} matched random-entry runs, same cost: {BAND_QUANTILES[0]:.0f}-{BAND_QUANTILES[1]:.0f}% band",
