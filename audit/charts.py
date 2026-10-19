@@ -271,7 +271,7 @@ def write_charts(result: dict, out_path: str, dates: pd.DatetimeIndex | None = N
             f"Equity and drawdown: {p.lookback}-bar breakout, target {p.target_atr} ATR, stop {p.stop_atr} ATR",
             (
                 "claim as submitted; dashed: only the look-ahead removed (ambiguous bars still booked to the target, no cost)",
-                f"corrected: look-ahead removed, ambiguous bars booked to the stop, {cost_bps:g} bps per round trip",
+                f"corrected: look-ahead removed, ambiguous bars booked to the stop, {cost_bps:.12g} bps per round trip",
             ),
             band=control["band_series"],
             band_name=f"{control['controls']} matched random-entry runs, same cost: {BAND_QUANTILES[0]:.0f}-{BAND_QUANTILES[1]:.0f}% band",

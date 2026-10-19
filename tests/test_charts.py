@@ -255,6 +255,14 @@ def test_write_charts_returns_relative_posix_paths(tmp_path):
     assert equity.count('class="band"') == 1 and "3 matched random-entry runs, same cost: 5-95% band" in equity  # and so does the band
 
 
+@pytest.mark.parametrize("position", ["leading", "trailing", "all"])
+def test_equity_x_axis_rejects_a_nat_at_any_position(position):
+    days = list(pd.bdate_range("2019-11-01", periods=50))
+    days = {"leading": [pd.NaT] + days[:49], "trailing": days[:49] + [pd.NaT], "all": [pd.NaT] * 50}[position]
+    with pytest.raises(ValueError, match="dates must be sorted"):
+        charts.equity_drawdown_svg(TWO, "t", dates=pd.DatetimeIndex(days))
+
+
 def test_legend_sits_on_an_opaque_box_over_the_gridlines_and_under_the_curves():
     svg = charts.equity_drawdown_svg(TWO, "t", band=np.zeros((3, 50)), band_name="band")
     lines = svg.splitlines()
@@ -263,6 +271,8 @@ def test_legend_sits_on_an_opaque_box_over_the_gridlines_and_under_the_curves():
     grid = [i for i, line in enumerate(lines) if f'stroke="{charts.GRID}"' in line]
     curves = [i for i, line in enumerate(lines) if line.startswith("<polyline")]
     assert max(i for i in grid if i < curves[0]) < box[0] < curves[0]  # hides the equity gridlines, never a curve
+    band = next(i for i, line in enumerate(lines) if 'class="band"' in line)
+    assert band < box[0]  # the box also hides the band behind the legend
     rect = _root(svg).find(f'.//{SVG}rect[@class="legend-box"]')
     assert rect.get("fill") == charts.SURFACE and rect.get("height") == str(16 * 3)  # two curves and the band
     assert float(rect.get("width")) >= 28 + charts.LEGEND_CHAR_PX * len("Corrected, final 1.00x")
@@ -276,6 +286,9 @@ def test_fractional_cost_is_printed_as_given_not_rounded(tmp_path):
     text = report.render(report.run_audit(synthetic_prices(500, seed=11), GRID, n_controls=3, cost_bps=12.5), "test", charts={"equity": "e.svg", "sensitivity": "s.svg"})
     assert "audit applies 12.5 bps round trip" in text and "charged the same 12.5 bps" in text and "With 12.5 bps of round-trip cost" in text
     assert " 12 bps" not in text and " 13 bps" not in text  # `.0f` printed 12.5 as 12
+    big = {"params": Params(*CHOSEN), "costs": {"cost_bps": 1e6}, "risk": {"series": {"claim": CLAIM, "no_lookahead": np.zeros(50), "corrected": CORRECTED}}, "sensitivity": {"surface": SURFACE},
+           "control": {"controls": 3, "band_series": np.zeros((3, 50))}}
+    assert "1000000 bps per round trip" in (tmp_path / charts.write_charts(big, str(tmp_path / "BIG.md"))["equity"]).read_text(encoding="utf-8")  # `:g` printed 1e+06
 
 
 def test_ordinal_suffixes_and_nan():
