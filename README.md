@@ -10,7 +10,7 @@ The point is not the strategy. The point is that every number in a backtest repo
 python -m venv .venv && .venv/Scripts/pip install -e ".[test]"   # Windows; on macOS/Linux use .venv/bin/pip
 python naive_backtest.py          # the claim: Sharpe 3.86, win rate 93.6%, p = 5.8e-51
 python -m audit                   # the audit: writes AUDIT_REPORT.md and charts/ in about five seconds
-python -m pytest                  # 54 tests; the artifact tests assert each artifact moves its metric the predicted way
+python -m pytest                  # 69 tests; the artifact tests assert each artifact moves its metric the predicted way
 python -m audit --csv data/btc_daily.csv --out APPENDIX_BTC.md   # same audit on real BTC daily data, offline
 ```
 
