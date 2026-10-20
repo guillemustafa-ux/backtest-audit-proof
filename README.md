@@ -1,6 +1,6 @@
 # backtest-audit-proof
 
-A backtest that finds a Sharpe ratio of 3.86 and a p-value of 10⁻⁵¹ in data that has **no edge by construction**, and the audit that takes that claim apart one methodological artifact at a time, ending in the written review a research-methodology audit is expected to deliver.
+A backtest that finds a Sharpe ratio of 3.86 and a one-sided p-value of 5.8e-51 in data that has **no edge by construction**, and the audit that takes that claim apart one methodological artifact at a time, ending in the written review a research-methodology audit is expected to deliver.
 
 The point is not the strategy. The point is that every number in a backtest report comes from a chain of decisions, and each decision can manufacture performance. On a driftless random walk the truth is known: whatever the naive backtest finds is an artifact, so the audit can put a number on each one.
 
